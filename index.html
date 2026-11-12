@@ -2310,61 +2310,78 @@
         let peerInstance = null;
         let hostConnections = new Map(); // uid -> DataConnection (used when mpState.isHost)
         let guestConnection = null;      // DataConnection to Host (used when Guest)
+        const memberLastSeen = new Map(); // uid -> timestamp (ms) tracked by Host
+        let lastHostHeartbeat = 0;        // timestamp (ms) tracked by Guest
 
         // MQTT Global Broker Client (Fallback + Public Lobby List across any device/network)
         let mqttClient = null;
-
-        function setNetworkStatus(text, isOnline = true) {
-            const el = document.getElementById('mpUserIdDisplay');
-            const dot = document.getElementById('mpStatusDot');
-            if (el) {
-                el.textContent = text;
-                el.className = isOnline ? 'text-[10px] text-emerald-400 mono' : 'text-[10px] text-amber-400 mono';
-            }
-            if (dot) {
-                dot.className = isOnline
-                    ? 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse'
-                    : 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
-            }
-        }
-
-        function generateRoomCode() {
-            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-            let code = '';
-            for (let i = 0; i < 6; i++) {
-                code += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return code;
-        }
-
-        function copyTextToClipboard(text) {
-            const ta = document.createElement('textarea');
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            try {
-                document.execCommand('copy');
-                showToast(`Copied Party Code: ${text}`);
-            } catch (e) {
-                showToast(`Party Code: ${text}`);
-            }
-            document.body.removeChild(ta);
-        }
-
-        function getLocalParties() {
-            try {
-                return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            } catch (e) {
-                return {};
-            }
-        }
-
-        function saveLocalParty(partyDoc) {
+        function deleteLocalParty(code) {
             try {
                 const map = getLocalParties();
-                map[partyDoc.code] = partyDoc;
+                delete map[code];
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
             } catch (e) {}
+        }
+
+        function removeMemberFromHostParty(uid, reason = 'left') {
+            if (!mpState.isHost || !mpState.partyData || !uid || uid === mpState.userId) return;
+            const slots = { ...(mpState.partyData.slots || {}) };
+            let removedBoatId = null;
+            let removedName = 'Member';
+
+            for (const id of BOAT_IDS) {
+                if (slots[id] && slots[id].uid === uid) {
+                    removedName = slots[id].name || 'Member';
+                    removedBoatId = id;
+                    delete slots[id];
+                }
+            }
+            memberLastSeen.delete(uid);
+            hostConnections.delete(uid);
+
+            if (removedBoatId) {
+                mpState.partyData.slots = slots;
+                mpState.partyData.updatedAt = Date.now();
+                delete mpState.remotePlayers[removedBoatId];
+
+                // Update active race boat if race is running
+                const boatObj = gameState.boats.find(b => b.id === removedBoatId);
+                if (boatObj) {
+                    boatObj.isRemoteHuman = false;
+                    boatObj.skipperName = '';
+                    boatObj.activeInRace = mpState.partyData.fillWithBots !== false;
+                }
+
+                broadcastPartyStateFromHost();
+                showToast(`👋 ${removedName} (${removedBoatId}) ${reason} and was removed from the party.`);
+            }
+        }
+
+        function handleHostClosedParty(code) {
+            if (!mpState.partyCode || (code && code !== mpState.partyCode)) return;
+            const closedCode = mpState.partyCode;
+            publicPartiesMap.delete(closedCode);
+            deleteLocalParty(closedCode);
+
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.unsubscribe(MQTT_TOPIC_ROOM_PREFIX + closedCode);
+            }
+            cleanupPeerConnections();
+
+            mpState.partyCode = null;
+            mpState.partyData = null;
+            mpState.isHost = false;
+            mpState.remotePlayers = {};
+            mpState.hostRaceState = null;
+
+            document.getElementById('mpActivePartyPanel').classList.add('hidden');
+            document.getElementById('mpLobbyBrowser').classList.remove('hidden');
+            document.getElementById('mpCurrentRoomBadge').classList.add('hidden');
+            document.getElementById('startRaceBtnLabel').textContent = 'Launch Race';
+            document.getElementById('mpLiveBadge').textContent = 'SOLO / BOT AI';
+
+            refreshPublicPartiesUI();
+            showToast(`⚠️ Party ${closedCode} was closed because the Host left.`);
         }
 
         // Initialize MQTT over WebSockets for instant global Public Party Discovery & Packet Relay
@@ -2439,11 +2456,16 @@
 
         function announcePublicLobby(partyDoc, deleted = false) {
             if (!partyDoc) return;
-            saveLocalParty(partyDoc);
-            if (partyDoc.isPublic && !deleted) {
-                publicPartiesMap.set(partyDoc.code, partyDoc);
-            } else {
+            if (deleted) {
+                deleteLocalParty(partyDoc.code);
                 publicPartiesMap.delete(partyDoc.code);
+            } else {
+                saveLocalParty(partyDoc);
+                if (partyDoc.isPublic) {
+                    publicPartiesMap.set(partyDoc.code, partyDoc);
+                } else {
+                    publicPartiesMap.delete(partyDoc.code);
+                }
             }
             refreshPublicPartiesUI();
 
@@ -2457,14 +2479,40 @@
                 } catch (e) {}
             }
             if (bc) {
-                try { bc.postMessage({ type: 'PARTY_UPDATED', party: partyDoc }); } catch (e) {}
+                try {
+                    bc.postMessage(deleted
+                        ? { type: 'PARTY_CLOSED', partyCode: partyDoc.code, code: partyDoc.code }
+                        : { type: 'PARTY_UPDATED', party: partyDoc }
+                    );
+                } catch (e) {}
             }
         }
 
         function handleIncomingPartyPacket(msg) {
             if (!msg || msg.senderId === mpState.userId) return;
 
+            if (msg.type === 'PARTY_CLOSED') {
+                const targetCode = msg.partyCode || msg.code;
+                if (targetCode) {
+                    publicPartiesMap.delete(targetCode);
+                    deleteLocalParty(targetCode);
+                    refreshPublicPartiesUI();
+                }
+                if (!mpState.isHost && mpState.partyCode && targetCode === mpState.partyCode) {
+                    handleHostClosedParty(targetCode);
+                }
+                return;
+            }
+
+            if (msg.type === 'MEMBER_HEARTBEAT' && mpState.isHost && msg.partyCode === mpState.partyCode) {
+                if (msg.uid) {
+                    memberLastSeen.set(msg.uid, Date.now());
+                }
+                return;
+            }
+
             if (msg.type === 'JOIN_REQUEST' && mpState.isHost && mpState.partyData) {
+                memberLastSeen.set(msg.uid, Date.now());
                 const slots = { ...(mpState.partyData.slots || {}) };
                 let assigned = BOAT_IDS.find(id => slots[id] && slots[id].uid === msg.uid);
                 if (!assigned) {
@@ -2478,6 +2526,7 @@
                     showToast(`⛵ ${msg.name} joined in boat ${assigned}!`);
                 }
             } else if (msg.type === 'CLAIM_SLOT' && mpState.isHost && mpState.partyData) {
+                memberLastSeen.set(msg.uid, Date.now());
                 const slots = { ...(mpState.partyData.slots || {}) };
                 const target = msg.slotId;
                 const existing = slots[target];
@@ -2491,18 +2540,16 @@
                     broadcastPartyStateFromHost();
                 }
             } else if (msg.type === 'LEAVE_PARTY' && mpState.isHost && mpState.partyData) {
-                const slots = { ...(mpState.partyData.slots || {}) };
-                for (const id of BOAT_IDS) {
-                    if (slots[id] && slots[id].uid === msg.uid) delete slots[id];
-                }
-                mpState.partyData.slots = slots;
-                mpState.partyData.updatedAt = Date.now();
-                broadcastPartyStateFromHost();
+                removeMemberFromHostParty(msg.uid, 'left');
             } else if (msg.type === 'PARTY_UPDATED' && msg.party && msg.party.code === mpState.partyCode) {
+                lastHostHeartbeat = Date.now();
                 mpState.partyData = msg.party;
                 saveLocalParty(msg.party);
                 syncActivePartyUI();
             } else if (msg.type === 'BOAT_STATE' && msg.partyCode === mpState.partyCode && msg.boat) {
+                if (msg.boat.uid) {
+                    memberLastSeen.set(msg.boat.uid, Date.now());
+                }
                 if (msg.boat.uid !== mpState.userId) {
                     mpState.remotePlayers[msg.boat.boatId] = msg.boat;
                 }
@@ -2515,6 +2562,7 @@
                     }
                 }
             } else if (msg.type === 'HOST_WORLD_SYNC' && !mpState.isHost && msg.partyCode === mpState.partyCode) {
+                lastHostHeartbeat = Date.now();
                 mpState.hostRaceState = {
                     phase: msg.phase,
                     timer: msg.timer,
@@ -2546,12 +2594,19 @@
         function refreshPublicPartiesUI() {
             const localMap = getLocalParties();
             for (const p of Object.values(localMap)) {
-                if (p && p.isPublic) publicPartiesMap.set(p.code, p);
+                if (p && p.isPublic && !p.deleted) publicPartiesMap.set(p.code, p);
             }
 
-            const cutoff = Date.now() - 1000 * 60 * 30;
+            // Expire any public party whose host hasn't updated within the last 12 seconds
+            const cutoff = Date.now() - 12000;
+            for (const [code, room] of publicPartiesMap.entries()) {
+                if (!room || room.deleted || !room.isPublic || (room.updatedAt || 0) <= cutoff) {
+                    publicPartiesMap.delete(code);
+                    deleteLocalParty(code);
+                }
+            }
+
             const publicRooms = Array.from(publicPartiesMap.values())
-                .filter(p => p && p.isPublic && (p.updatedAt || 0) > cutoff)
                 .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
             document.getElementById('publicPartiesCount').textContent = `${publicRooms.length} Active`;
@@ -2719,14 +2774,24 @@
                             }
                         });
                         conn.on('data', (data) => {
-                            if (data && data.senderId) {
-                                hostConnections.set(data.senderId, conn);
+                            if (data) {
+                                const guestUid = data.uid || data.senderId;
+                                if (guestUid) {
+                                    conn._guestUid = guestUid;
+                                    hostConnections.set(guestUid, conn);
+                                    memberLastSeen.set(guestUid, Date.now());
+                                }
                             }
                             handleIncomingPartyPacket(data);
                         });
-                        conn.on('close', () => {
+                        const onGuestDisconnect = () => {
                             hostConnections.delete(conn.peer);
-                        });
+                            if (conn._guestUid) {
+                                removeMemberFromHostParty(conn._guestUid, 'closed their tab');
+                            }
+                        };
+                        conn.on('close', onGuestDisconnect);
+                        conn.on('error', onGuestDisconnect);
                     });
                 } catch (e) {}
             }
@@ -2754,6 +2819,7 @@
             mpState.partyCode = code;
             mpState.isHost = false;
             mpState.remotePlayers = {};
+            lastHostHeartbeat = Date.now();
 
             // Temporary placeholder until Host responds over WebRTC / MQTT / LocalStorage
             const knownParty = publicPartiesMap.get(code) || getLocalParties()[code];
@@ -2804,6 +2870,7 @@
                         const conn = peerInstance.connect(PEER_PREFIX + code, { reliable: true });
                         guestConnection = conn;
                         conn.on('open', () => {
+                            lastHostHeartbeat = Date.now();
                             setNetworkStatus(`Connected to ${code} (P2P Live)`, true);
                             conn.send({
                                 type: 'JOIN_REQUEST',
@@ -2814,7 +2881,13 @@
                             });
                         });
                         conn.on('data', (data) => {
+                            lastHostHeartbeat = Date.now();
                             handleIncomingPartyPacket(data);
+                        });
+                        conn.on('close', () => {
+                            if (mpState.partyCode === code && !mpState.isHost) {
+                                handleHostClosedParty(code);
+                            }
                         });
                     });
                 } catch (e) {}
@@ -2858,6 +2931,10 @@
         function leaveCurrentParty() {
             if (mpState.partyCode) {
                 if (mpState.isHost && mpState.partyData) {
+                    sendPartyPacket({
+                        type: 'PARTY_CLOSED',
+                        code: mpState.partyCode
+                    });
                     announcePublicLobby(mpState.partyData, true);
                 } else {
                     sendPartyPacket({
@@ -2870,6 +2947,7 @@
                 }
             }
             cleanupPeerConnections();
+            memberLastSeen.clear();
             mpState.partyCode = null;
             mpState.partyData = null;
             mpState.isHost = false;
@@ -2881,8 +2959,69 @@
             document.getElementById('mpCurrentRoomBadge').classList.add('hidden');
             document.getElementById('startRaceBtnLabel').textContent = 'Launch Race';
             document.getElementById('mpLiveBadge').textContent = 'SOLO / BOT AI';
+            refreshPublicPartiesUI();
             showToast('Left multiplayer party.');
         }
+
+        // Detect when the GitHub.io / Browser tab is closed or navigated away
+        let unloadHandled = false;
+        function handleTabCloseOrUnload() {
+            if (unloadHandled || !mpState.partyCode) return;
+            unloadHandled = true;
+            if (mpState.isHost && mpState.partyData) {
+                sendPartyPacket({
+                    type: 'PARTY_CLOSED',
+                    code: mpState.partyCode
+                });
+                announcePublicLobby(mpState.partyData, true);
+            } else {
+                sendPartyPacket({
+                    type: 'LEAVE_PARTY',
+                    uid: mpState.userId
+                });
+            }
+            cleanupPeerConnections();
+        }
+
+        window.addEventListener('pagehide', handleTabCloseOrUnload);
+        window.addEventListener('beforeunload', handleTabCloseOrUnload);
+
+        // Live Heartbeat & Disconnect Watchdog (every 2.5 seconds)
+        setInterval(() => {
+            const now = Date.now();
+
+            if (mpState.partyCode) {
+                if (mpState.isHost && mpState.partyData) {
+                    // 1. Host refreshes party timestamp and checks for disconnected members (> 7.5s silent)
+                    mpState.partyData.updatedAt = now;
+                    broadcastPartyStateFromHost();
+
+                    const slots = mpState.partyData.slots || {};
+                    for (const id of BOAT_IDS) {
+                        const occupant = slots[id];
+                        if (occupant && occupant.uid && occupant.uid !== mpState.userId) {
+                            const lastSeen = memberLastSeen.get(occupant.uid) || now;
+                            if (now - lastSeen > 7500) {
+                                removeMemberFromHostParty(occupant.uid, 'disconnected');
+                            }
+                        }
+                    }
+                } else if (!mpState.isHost) {
+                    // 2. Guest sends heartbeat to Host & checks if Host disappeared (> 8.5s silent)
+                    sendPartyPacket({
+                        type: 'MEMBER_HEARTBEAT',
+                        uid: mpState.userId,
+                        name: mpState.playerName
+                    });
+
+                    if (lastHostHeartbeat > 0 && (now - lastHostHeartbeat > 8500)) {
+                        handleHostClosedParty(mpState.partyCode);
+                    }
+                }
+            }
+
+            refreshPublicPartiesUI();
+        }, 2500);
 
         window.triggerPartyRaceStart = function() {
             if (mpState.partyCode && mpState.partyData) {
