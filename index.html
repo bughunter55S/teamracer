@@ -6,6 +6,9 @@
     <title>C420 Team Racing Simulator — Digital N & 3v3 Multiplayer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <!-- PeerJS WebRTC P2P Engine & MQTT WebSockets for Real Cross-Device Online Multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap');
 
@@ -1486,8 +1489,19 @@
         function updateSimulation(dt) {
             updateWindField(dt);
 
+            const isPartyGuest = !!(mpState.partyCode && !mpState.isHost);
+            if (isPartyGuest && mpState.hostRaceState) {
+                // Keep guest clock, phase, and base wind locked to host
+                gameState.phase = mpState.hostRaceState.phase || gameState.phase;
+                gameState.timer = mpState.hostRaceState.timer ?? gameState.timer;
+                gameState.baseWindDir = mpState.hostRaceState.baseWindDir ?? gameState.baseWindDir;
+                gameState.baseWindSpeed = mpState.hostRaceState.baseWindSpeed ?? gameState.baseWindSpeed;
+            }
+
             if (gameState.phase === 'PRESTART') {
-                gameState.timer -= dt;
+                if (!isPartyGuest) {
+                    gameState.timer -= dt;
+                }
                 if (gameState.timer <= 0) {
                     gameState.phase = 'RACING';
                     gameState.timer = 0;
@@ -1511,7 +1525,7 @@
                         showToast('🎺 START GUN! All boats clear — cross the Start Line!');
                     }
                 }
-            } else if (gameState.phase === 'RACING') {
+            } else if (gameState.phase === 'RACING' && !isPartyGuest) {
                 gameState.timer += dt;
             }
 
@@ -1519,6 +1533,10 @@
             const { sorted, rankMap } = computeStandings();
 
             for (const boat of gameState.boats) {
+                // If we are a guest in a multiplayer party, the Host simulates AI bots and sends their positions
+                if (isPartyGuest && !boat.isPlayer && !boat.isRemoteHuman && mpState.remotePlayers[boat.id]) {
+                    boat.isRemoteHuman = true;
+                }
                 boat.update(dt, rankMap);
             }
 
@@ -2274,25 +2292,40 @@
         requestAnimationFrame(gameLoop);
     </script>
 
-    <!-- HYBRID MULTIPLAYER PARTY & LOBBY MODULE (Supports Cloud Firebase + Local Cross-Tab BroadcastChannel) -->
+    <!-- REAL CROSS-DEVICE MULTIPLAYER ENGINE (WebRTC PeerJS + Global MQTT Public Discovery + Cloud Firestore) -->
     <script type="module">
         const BOAT_IDS = ['B1', 'B2', 'B3', 'R1', 'R2', 'R3'];
-        const STORAGE_KEY = 'c420_tr_parties_v1';
-        const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('c420_team_racing_channel') : null;
+        const STORAGE_KEY = 'c420_tr_parties_v2';
+        const PEER_PREFIX = 'c420tr-party-';
+        const MQTT_TOPIC_LOBBIES = 'c420tr/v2/public_lobbies';
+        const MQTT_TOPIC_ROOM_PREFIX = 'c420tr/v2/room/';
+
+        const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('c420_team_racing_channel_v2') : null;
         let lastStartedRaceStamp = 0;
 
-        function getLocalParties() {
-            try {
-                return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            } catch (e) {
-                return {};
-            }
-        }
+        // Global Public Lobbies Map (aggregated from MQTT, Firestore, and LocalStorage)
+        const publicPartiesMap = new Map();
 
-        function saveLocalParties(map) {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-            } catch (e) {}
+        // PeerJS State (Host acts as WebRTC Star Hub for the 6-boat room; Guests connect to Host)
+        let peerInstance = null;
+        let hostConnections = new Map(); // uid -> DataConnection (used when mpState.isHost)
+        let guestConnection = null;      // DataConnection to Host (used when Guest)
+
+        // MQTT Global Broker Client (Fallback + Public Lobby List across any device/network)
+        let mqttClient = null;
+
+        function setNetworkStatus(text, isOnline = true) {
+            const el = document.getElementById('mpUserIdDisplay');
+            const dot = document.getElementById('mpStatusDot');
+            if (el) {
+                el.textContent = text;
+                el.className = isOnline ? 'text-[10px] text-emerald-400 mono' : 'text-[10px] text-amber-400 mono';
+            }
+            if (dot) {
+                dot.className = isOnline
+                    ? 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse'
+                    : 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+            }
         }
 
         function generateRoomCode() {
@@ -2305,10 +2338,6 @@
         }
 
         function copyTextToClipboard(text) {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(() => showToast(`Copied Party Code: ${text}`)).catch(() => {});
-                return;
-            }
             const ta = document.createElement('textarea');
             ta.value = text;
             document.body.appendChild(ta);
@@ -2322,17 +2351,213 @@
             document.body.removeChild(ta);
         }
 
+        function getLocalParties() {
+            try {
+                return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveLocalParty(partyDoc) {
+            try {
+                const map = getLocalParties();
+                map[partyDoc.code] = partyDoc;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+            } catch (e) {}
+        }
+
+        // Initialize MQTT over WebSockets for instant global Public Party Discovery & Packet Relay
+        function initGlobalMqtt() {
+            if (typeof mqtt === 'undefined') return;
+            try {
+                mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+                    clientId: 'c420_' + mpState.userId + '_' + Math.random().toString(16).slice(2, 6),
+                    clean: true,
+                    connectTimeout: 5000,
+                    reconnectPeriod: 3000
+                });
+
+                mqttClient.on('connect', () => {
+                    setNetworkStatus(`Online Ready • ID: ${mpState.userId}`, true);
+                    mqttClient.subscribe(MQTT_TOPIC_LOBBIES);
+                    if (mpState.partyCode) {
+                        mqttClient.subscribe(MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode);
+                    }
+                });
+
+                mqttClient.on('message', (topic, payload) => {
+                    try {
+                        const msg = JSON.parse(payload.toString());
+                        if (!msg) return;
+
+                        if (topic === MQTT_TOPIC_LOBBIES && msg.party) {
+                            const p = msg.party;
+                            if (p.deleted || !p.isPublic) {
+                                publicPartiesMap.delete(p.code);
+                            } else {
+                                publicPartiesMap.set(p.code, p);
+                            }
+                            refreshPublicPartiesUI();
+                        } else if (mpState.partyCode && topic === (MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode)) {
+                            handleIncomingPartyPacket(msg);
+                        }
+                    } catch (err) {}
+                });
+            } catch (e) {}
+        }
+
+        // Send a packet to everyone in the current party via WebRTC (PeerJS), MQTT room topic, and BroadcastChannel
+        function sendPartyPacket(packet) {
+            if (!mpState.partyCode) return;
+            packet.partyCode = mpState.partyCode;
+            packet.senderId = mpState.userId;
+
+            // 1. WebRTC PeerJS Low-Latency DataChannel
+            if (mpState.isHost) {
+                for (const conn of hostConnections.values()) {
+                    if (conn && conn.open) {
+                        try { conn.send(packet); } catch (e) {}
+                    }
+                }
+            } else if (guestConnection && guestConnection.open) {
+                try { guestConnection.send(packet); } catch (e) {}
+            }
+
+            // 2. Global MQTT Room Topic (Guarantees delivery even across strict NAT/firewalls)
+            if (mqttClient && mqttClient.connected) {
+                try {
+                    mqttClient.publish(MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode, JSON.stringify(packet));
+                } catch (e) {}
+            }
+
+            // 3. Same-Browser Cross-Tab BroadcastChannel
+            if (bc) {
+                try { bc.postMessage(packet); } catch (e) {}
+            }
+        }
+
+        function announcePublicLobby(partyDoc, deleted = false) {
+            if (!partyDoc) return;
+            saveLocalParty(partyDoc);
+            if (partyDoc.isPublic && !deleted) {
+                publicPartiesMap.set(partyDoc.code, partyDoc);
+            } else {
+                publicPartiesMap.delete(partyDoc.code);
+            }
+            refreshPublicPartiesUI();
+
+            if (mqttClient && mqttClient.connected) {
+                try {
+                    mqttClient.publish(
+                        MQTT_TOPIC_LOBBIES,
+                        JSON.stringify({ party: { ...partyDoc, deleted } }),
+                        { retain: true }
+                    );
+                } catch (e) {}
+            }
+            if (bc) {
+                try { bc.postMessage({ type: 'PARTY_UPDATED', party: partyDoc }); } catch (e) {}
+            }
+        }
+
+        function handleIncomingPartyPacket(msg) {
+            if (!msg || msg.senderId === mpState.userId) return;
+
+            if (msg.type === 'JOIN_REQUEST' && mpState.isHost && mpState.partyData) {
+                const slots = { ...(mpState.partyData.slots || {}) };
+                let assigned = BOAT_IDS.find(id => slots[id] && slots[id].uid === msg.uid);
+                if (!assigned) {
+                    assigned = BOAT_IDS.find(id => !slots[id]);
+                }
+                if (assigned) {
+                    slots[assigned] = { uid: msg.uid, name: msg.name || 'Skipper' };
+                    mpState.partyData.slots = slots;
+                    mpState.partyData.updatedAt = Date.now();
+                    broadcastPartyStateFromHost();
+                    showToast(`⛵ ${msg.name} joined in boat ${assigned}!`);
+                }
+            } else if (msg.type === 'CLAIM_SLOT' && mpState.isHost && mpState.partyData) {
+                const slots = { ...(mpState.partyData.slots || {}) };
+                const target = msg.slotId;
+                const existing = slots[target];
+                if (!existing || existing.uid === msg.uid) {
+                    for (const id of BOAT_IDS) {
+                        if (slots[id] && slots[id].uid === msg.uid) delete slots[id];
+                    }
+                    slots[target] = { uid: msg.uid, name: msg.name || 'Skipper' };
+                    mpState.partyData.slots = slots;
+                    mpState.partyData.updatedAt = Date.now();
+                    broadcastPartyStateFromHost();
+                }
+            } else if (msg.type === 'LEAVE_PARTY' && mpState.isHost && mpState.partyData) {
+                const slots = { ...(mpState.partyData.slots || {}) };
+                for (const id of BOAT_IDS) {
+                    if (slots[id] && slots[id].uid === msg.uid) delete slots[id];
+                }
+                mpState.partyData.slots = slots;
+                mpState.partyData.updatedAt = Date.now();
+                broadcastPartyStateFromHost();
+            } else if (msg.type === 'PARTY_UPDATED' && msg.party && msg.party.code === mpState.partyCode) {
+                mpState.partyData = msg.party;
+                saveLocalParty(msg.party);
+                syncActivePartyUI();
+            } else if (msg.type === 'BOAT_STATE' && msg.partyCode === mpState.partyCode && msg.boat) {
+                if (msg.boat.uid !== mpState.userId) {
+                    mpState.remotePlayers[msg.boat.boatId] = msg.boat;
+                }
+                // If we are Host, relay guest boat state to other connected PeerJS guests
+                if (mpState.isHost) {
+                    for (const [peerUid, conn] of hostConnections.entries()) {
+                        if (peerUid !== msg.senderId && conn && conn.open) {
+                            try { conn.send(msg); } catch (e) {}
+                        }
+                    }
+                }
+            } else if (msg.type === 'HOST_WORLD_SYNC' && !mpState.isHost && msg.partyCode === mpState.partyCode) {
+                mpState.hostRaceState = {
+                    phase: msg.phase,
+                    timer: msg.timer,
+                    baseWindDir: msg.baseWindDir,
+                    baseWindSpeed: msg.baseWindSpeed
+                };
+                if (Array.isArray(msg.boats)) {
+                    for (const bState of msg.boats) {
+                        // Don't overwrite the local player's own boat
+                        const localPlayerBoat = gameState.boats.find(b => b.isPlayer && b.activeInRace);
+                        if (localPlayerBoat && localPlayerBoat.id === bState.boatId) continue;
+                        mpState.remotePlayers[bState.boatId] = bState;
+                    }
+                }
+            }
+        }
+
+        function broadcastPartyStateFromHost() {
+            if (!mpState.partyData) return;
+            saveLocalParty(mpState.partyData);
+            sendPartyPacket({
+                type: 'PARTY_UPDATED',
+                party: mpState.partyData
+            });
+            announcePublicLobby(mpState.partyData, false);
+            syncActivePartyUI();
+        }
+
         function refreshPublicPartiesUI() {
-            const parties = getLocalParties();
-            const cutoff = Date.now() - 1000 * 60 * 60;
-            const publicRooms = Object.values(parties)
+            const localMap = getLocalParties();
+            for (const p of Object.values(localMap)) {
+                if (p && p.isPublic) publicPartiesMap.set(p.code, p);
+            }
+
+            const cutoff = Date.now() - 1000 * 60 * 30;
+            const publicRooms = Array.from(publicPartiesMap.values())
                 .filter(p => p && p.isPublic && (p.updatedAt || 0) > cutoff)
                 .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
             document.getElementById('publicPartiesCount').textContent = `${publicRooms.length} Active`;
             const listEl = document.getElementById('publicPartiesList');
             if (publicRooms.length === 0) {
-                listEl.innerHTML = `<div class="text-slate-500 text-[11px] italic py-2 text-center">No public parties open yet. Click "Host Public Party" above!</div>`;
+                listEl.innerHTML = `<div class="text-slate-500 text-[11px] italic py-2 text-center">No public parties open right now. Click "Host Public Party" to start one!</div>`;
             } else {
                 listEl.innerHTML = publicRooms.map(room => {
                     const playerCount = Object.keys(room.slots || {}).length;
@@ -2408,6 +2633,7 @@
 
             const botToggle = document.getElementById('partyFillBotsToggle');
             botToggle.checked = data.fillWithBots !== false;
+            botToggle.disabled = !mpState.isHost;
             config.fillWithBots = data.fillWithBots !== false;
 
             const mySlot = BOAT_IDS.find(id => data.slots && data.slots[id] && data.slots[id].uid === mpState.userId);
@@ -2416,8 +2642,11 @@
                 document.getElementById('selectedBoatHeaderBadge').textContent = `${mySlot.startsWith('B') ? 'BLUE' : 'RED'} (${mySlot})`;
             }
 
-            document.getElementById('startRaceBtnLabel').textContent = `Launch Party Race (${mpState.partyCode})`;
-            document.getElementById('mpLiveBadge').textContent = `PARTY: ${mpState.partyCode}`;
+            const playerCount = Object.keys(data.slots || {}).length;
+            document.getElementById('startRaceBtnLabel').textContent = mpState.isHost
+                ? `Launch Party Race (${playerCount} Joined)`
+                : `Launch / Sync Race (${mpState.partyCode})`;
+            document.getElementById('mpLiveBadge').textContent = `PARTY: ${mpState.partyCode} (${playerCount}P)`;
             renderPartySlotsUI();
 
             if (data.raceStamp && data.raceStamp !== lastStartedRaceStamp) {
@@ -2426,15 +2655,23 @@
             }
         }
 
-        function broadcastPartyUpdate(partyDoc) {
-            const parties = getLocalParties();
-            parties[partyDoc.code] = partyDoc;
-            saveLocalParties(parties);
-            if (bc) bc.postMessage({ type: 'PARTY_UPDATED', party: partyDoc });
-            refreshPublicPartiesUI();
+        function cleanupPeerConnections() {
+            for (const conn of hostConnections.values()) {
+                try { conn.close(); } catch (e) {}
+            }
+            hostConnections.clear();
+            if (guestConnection) {
+                try { guestConnection.close(); } catch (e) {}
+                guestConnection = null;
+            }
+            if (peerInstance) {
+                try { peerInstance.destroy(); } catch (e) {}
+                peerInstance = null;
+            }
         }
 
         function createParty(isPublic) {
+            cleanupPeerConnections();
             const code = generateRoomCode();
             mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
             const startLen = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
@@ -2458,8 +2695,51 @@
                 }
             };
 
-            broadcastPartyUpdate(partyDoc);
-            joinPartyByCode(code);
+            mpState.partyCode = code;
+            mpState.partyData = partyDoc;
+            mpState.isHost = true;
+            mpState.remotePlayers = {};
+
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.subscribe(MQTT_TOPIC_ROOM_PREFIX + code);
+            }
+
+            // Create WebRTC Host Peer listening on deterministic ID `c420tr-party-CODE`
+            if (typeof Peer !== 'undefined') {
+                try {
+                    peerInstance = new Peer(PEER_PREFIX + code);
+                    peerInstance.on('open', () => {
+                        setNetworkStatus(`Hosting ${code} (WebRTC + Cloud Live)`, true);
+                    });
+                    peerInstance.on('connection', (conn) => {
+                        conn.on('open', () => {
+                            hostConnections.set(conn.peer, conn);
+                            if (mpState.partyData) {
+                                conn.send({ type: 'PARTY_UPDATED', party: mpState.partyData });
+                            }
+                        });
+                        conn.on('data', (data) => {
+                            if (data && data.senderId) {
+                                hostConnections.set(data.senderId, conn);
+                            }
+                            handleIncomingPartyPacket(data);
+                        });
+                        conn.on('close', () => {
+                            hostConnections.delete(conn.peer);
+                        });
+                    });
+                } catch (e) {}
+            }
+
+            document.getElementById('mpLobbyBrowser').classList.add('hidden');
+            document.getElementById('mpActivePartyPanel').classList.remove('hidden');
+            document.getElementById('partyCodeDisplay').textContent = code;
+            const curBadge = document.getElementById('mpCurrentRoomBadge');
+            curBadge.textContent = `HOSTING: ${code}`;
+            curBadge.classList.remove('hidden');
+
+            broadcastPartyStateFromHost();
+            showToast(`Hosted ${isPublic ? 'Public' : 'Private'} Party ${code}! Share the code with friends.`);
         }
 
         function joinPartyByCode(rawCode) {
@@ -2469,30 +2749,27 @@
                 return;
             }
 
-            const parties = getLocalParties();
-            const data = parties[code];
-            if (!data) {
-                showToast(`Party ${code} not found!`);
-                return;
-            }
-
+            cleanupPeerConnections();
             mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
-            const slots = { ...(data.slots || {}) };
-
-            let myBoat = BOAT_IDS.find(id => slots[id] && slots[id].uid === mpState.userId);
-            if (!myBoat) {
-                myBoat = BOAT_IDS.find(id => !slots[id]);
-                if (myBoat) {
-                    slots[myBoat] = { uid: mpState.userId, name: mpState.playerName };
-                    data.slots = slots;
-                    data.updatedAt = Date.now();
-                    broadcastPartyUpdate(data);
-                }
-            }
-
             mpState.partyCode = code;
-            mpState.partyData = data;
-            mpState.isHost = data.hostId === mpState.userId;
+            mpState.isHost = false;
+            mpState.remotePlayers = {};
+
+            // Temporary placeholder until Host responds over WebRTC / MQTT / LocalStorage
+            const knownParty = publicPartiesMap.get(code) || getLocalParties()[code];
+            mpState.partyData = knownParty || {
+                code,
+                hostId: '',
+                hostName: 'Connecting...',
+                isPublic: true,
+                fillWithBots: true,
+                status: 'LOBBY',
+                startLengthSec: 30,
+                penaltyTurnsRequired: 1,
+                windMode: 'shifty',
+                raceStamp: 0,
+                slots: {}
+            };
 
             document.getElementById('mpLobbyBrowser').classList.add('hidden');
             document.getElementById('mpActivePartyPanel').classList.remove('hidden');
@@ -2500,13 +2777,56 @@
             const curBadge = document.getElementById('mpCurrentRoomBadge');
             curBadge.textContent = `PARTY: ${code}`;
             curBadge.classList.remove('hidden');
-
             syncActivePartyUI();
-            showToast(`Joined Party ${code}!`);
+
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.subscribe(MQTT_TOPIC_ROOM_PREFIX + code, () => {
+                    sendPartyPacket({
+                        type: 'JOIN_REQUEST',
+                        uid: mpState.userId,
+                        name: mpState.playerName
+                    });
+                });
+            }
+
+            // Also send via BroadcastChannel for same-computer tabs
+            sendPartyPacket({
+                type: 'JOIN_REQUEST',
+                uid: mpState.userId,
+                name: mpState.playerName
+            });
+
+            // Connect via WebRTC PeerJS directly to the Host's Peer ID
+            if (typeof Peer !== 'undefined') {
+                try {
+                    peerInstance = new Peer();
+                    peerInstance.on('open', () => {
+                        const conn = peerInstance.connect(PEER_PREFIX + code, { reliable: true });
+                        guestConnection = conn;
+                        conn.on('open', () => {
+                            setNetworkStatus(`Connected to ${code} (P2P Live)`, true);
+                            conn.send({
+                                type: 'JOIN_REQUEST',
+                                senderId: mpState.userId,
+                                partyCode: code,
+                                uid: mpState.userId,
+                                name: mpState.playerName
+                            });
+                        });
+                        conn.on('data', (data) => {
+                            handleIncomingPartyPacket(data);
+                        });
+                    });
+                } catch (e) {}
+            }
+
+            showToast(`Connecting to Party ${code}...`);
         }
 
         function claimBoatSlot(targetBoatId) {
             if (!mpState.partyCode || !mpState.partyData) return;
+            mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
+
             const slots = { ...(mpState.partyData.slots || {}) };
             const existing = slots[targetBoatId];
             if (existing && existing.uid !== mpState.userId) {
@@ -2514,35 +2834,48 @@
                 return;
             }
 
-            for (const id of BOAT_IDS) {
-                if (slots[id] && slots[id].uid === mpState.userId) {
-                    delete slots[id];
-                }
-            }
-
-            mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
-            slots[targetBoatId] = { uid: mpState.userId, name: mpState.playerName };
-            mpState.partyData.slots = slots;
-            mpState.partyData.updatedAt = Date.now();
-            config.playerBoatId = targetBoatId;
-
-            broadcastPartyUpdate(mpState.partyData);
-            syncActivePartyUI();
-        }
-
-        function leaveCurrentParty() {
-            if (mpState.partyCode && mpState.partyData) {
-                const slots = { ...(mpState.partyData.slots || {}) };
+            if (mpState.isHost) {
                 for (const id of BOAT_IDS) {
                     if (slots[id] && slots[id].uid === mpState.userId) delete slots[id];
                 }
+                slots[targetBoatId] = { uid: mpState.userId, name: mpState.playerName };
                 mpState.partyData.slots = slots;
                 mpState.partyData.updatedAt = Date.now();
-                broadcastPartyUpdate(mpState.partyData);
+                config.playerBoatId = targetBoatId;
+                broadcastPartyStateFromHost();
+            } else {
+                // Optimistically update UI & send request to Host
+                config.playerBoatId = targetBoatId;
+                sendPartyPacket({
+                    type: 'CLAIM_SLOT',
+                    uid: mpState.userId,
+                    name: mpState.playerName,
+                    slotId: targetBoatId
+                });
             }
+        }
+
+        function leaveCurrentParty() {
+            if (mpState.partyCode) {
+                if (mpState.isHost && mpState.partyData) {
+                    announcePublicLobby(mpState.partyData, true);
+                } else {
+                    sendPartyPacket({
+                        type: 'LEAVE_PARTY',
+                        uid: mpState.userId
+                    });
+                }
+                if (mqttClient && mqttClient.connected) {
+                    mqttClient.unsubscribe(MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode);
+                }
+            }
+            cleanupPeerConnections();
             mpState.partyCode = null;
             mpState.partyData = null;
+            mpState.isHost = false;
             mpState.remotePlayers = {};
+            mpState.hostRaceState = null;
+
             document.getElementById('mpActivePartyPanel').classList.add('hidden');
             document.getElementById('mpLobbyBrowser').classList.remove('hidden');
             document.getElementById('mpCurrentRoomBadge').classList.add('hidden');
@@ -2553,83 +2886,95 @@
 
         window.triggerPartyRaceStart = function() {
             if (mpState.partyCode && mpState.partyData) {
-                mpState.partyData.startLengthSec = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
-                mpState.partyData.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
-                mpState.partyData.windMode = document.getElementById('selectWindMode').value || 'shifty';
-                mpState.partyData.status = 'RACING';
-                mpState.partyData.raceStamp = Date.now();
-                mpState.partyData.updatedAt = Date.now();
-                lastStartedRaceStamp = mpState.partyData.raceStamp;
-                broadcastPartyUpdate(mpState.partyData);
-                startNewRegatta();
+                if (mpState.isHost) {
+                    mpState.partyData.startLengthSec = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
+                    mpState.partyData.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
+                    mpState.partyData.windMode = document.getElementById('selectWindMode').value || 'shifty';
+                    mpState.partyData.status = 'RACING';
+                    mpState.partyData.raceStamp = Date.now();
+                    mpState.partyData.updatedAt = Date.now();
+                    lastStartedRaceStamp = mpState.partyData.raceStamp;
+                    broadcastPartyStateFromHost();
+                    startNewRegatta();
+                } else {
+                    startNewRegatta();
+                }
             } else {
                 startNewRegatta();
             }
         };
 
         window.syncLocalBoatToParty = function() {
-            if (!mpState.partyCode || !gameState.running || !bc) return;
+            if (!mpState.partyCode || !gameState.running) return;
             const now = performance.now();
-            if (now - mpState.lastSyncSent < 50) return;
+            if (now - mpState.lastSyncSent < 45) return;
             mpState.lastSyncSent = now;
 
             const playerBoat = gameState.boats.find(b => b.isPlayer && b.activeInRace);
-            if (!playerBoat) return;
+            if (playerBoat) {
+                sendPartyPacket({
+                    type: 'BOAT_STATE',
+                    boat: {
+                        boatId: playerBoat.id,
+                        uid: mpState.userId,
+                        skipperName: mpState.playerName,
+                        x: playerBoat.x,
+                        y: playerBoat.y,
+                        heading: playerBoat.heading,
+                        speed: playerBoat.speed,
+                        tack: playerBoat.tack,
+                        twa: playerBoat.twa,
+                        luffing: playerBoat.luffing,
+                        spinning: playerBoat.spinning,
+                        penalties: playerBoat.penalties,
+                        leg: playerBoat.leg,
+                        finished: playerBoat.finished,
+                        finishTime: playerBoat.finishTime,
+                        ocs: playerBoat.ocs
+                    }
+                });
+            }
 
-            bc.postMessage({
-                type: 'BOAT_STATE',
-                partyCode: mpState.partyCode,
-                boat: {
-                    boatId: playerBoat.id,
-                    uid: mpState.userId,
-                    skipperName: mpState.playerName,
-                    x: playerBoat.x,
-                    y: playerBoat.y,
-                    heading: playerBoat.heading,
-                    speed: playerBoat.speed,
-                    tack: playerBoat.tack,
-                    twa: playerBoat.twa,
-                    luffing: playerBoat.luffing,
-                    spinning: playerBoat.spinning,
-                    penalties: playerBoat.penalties,
-                    leg: playerBoat.leg,
-                    finished: playerBoat.finished,
-                    finishTime: playerBoat.finishTime,
-                    ocs: playerBoat.ocs
-                }
-            });
+            // Host also broadcasts authoritative timer, wind, and AI bot boats so all players stay in sync
+            if (mpState.isHost) {
+                const slots = (mpState.partyData && mpState.partyData.slots) ? mpState.partyData.slots : {};
+                const botBoats = gameState.boats
+                    .filter(b => b.activeInRace && !slots[b.id])
+                    .map(b => ({
+                        boatId: b.id,
+                        uid: 'HOST_BOT',
+                        skipperName: '',
+                        x: b.x,
+                        y: b.y,
+                        heading: b.heading,
+                        speed: b.speed,
+                        tack: b.tack,
+                        twa: b.twa,
+                        luffing: b.luffing,
+                        spinning: b.spinning,
+                        penalties: b.penalties,
+                        leg: b.leg,
+                        finished: b.finished,
+                        finishTime: b.finishTime,
+                        ocs: b.ocs
+                    }));
+
+                sendPartyPacket({
+                    type: 'HOST_WORLD_SYNC',
+                    phase: gameState.phase,
+                    timer: gameState.timer,
+                    baseWindDir: gameState.baseWindDir,
+                    baseWindSpeed: gameState.baseWindSpeed,
+                    boats: botBoats
+                });
+            }
         };
 
         if (bc) {
             bc.onmessage = (ev) => {
-                const msg = ev.data;
-                if (!msg) return;
-                if (msg.type === 'PARTY_UPDATED') {
-                    refreshPublicPartiesUI();
-                    if (mpState.partyCode && msg.party && msg.party.code === mpState.partyCode) {
-                        mpState.partyData = msg.party;
-                        syncActivePartyUI();
-                    }
-                } else if (msg.type === 'BOAT_STATE' && mpState.partyCode === msg.partyCode && msg.boat) {
-                    if (msg.boat.uid !== mpState.userId) {
-                        mpState.remotePlayers[msg.boat.boatId] = msg.boat;
-                    }
-                }
+                handleIncomingPartyPacket(ev.data);
             };
         }
-
-        window.addEventListener('storage', (ev) => {
-            if (ev.key === STORAGE_KEY) {
-                refreshPublicPartiesUI();
-                if (mpState.partyCode) {
-                    const parties = getLocalParties();
-                    if (parties[mpState.partyCode]) {
-                        mpState.partyData = parties[mpState.partyCode];
-                        syncActivePartyUI();
-                    }
-                }
-            }
-        });
 
         // Bind Party Lobby UI Buttons
         document.getElementById('createPublicPartyBtn').addEventListener('click', () => createParty(true));
@@ -2642,14 +2987,14 @@
         });
         document.getElementById('leavePartyBtn').addEventListener('click', leaveCurrentParty);
         document.getElementById('partyFillBotsToggle').addEventListener('change', (e) => {
-            if (!mpState.partyCode || !mpState.partyData) return;
+            if (!mpState.partyCode || !mpState.partyData || !mpState.isHost) return;
             mpState.partyData.fillWithBots = e.target.checked;
             mpState.partyData.updatedAt = Date.now();
-            broadcastPartyUpdate(mpState.partyData);
-            syncActivePartyUI();
+            broadcastPartyStateFromHost();
         });
 
-        document.getElementById('mpUserIdDisplay').textContent = `ID: ${mpState.userId}`;
+        setNetworkStatus(`Connecting • ID: ${mpState.userId}`, true);
+        initGlobalMqtt();
         refreshPublicPartiesUI();
     </script>
 </body>
