@@ -225,7 +225,7 @@
                         <i class="fa-solid fa-sailboat"></i> 2025–2028 RRS & Appendix D Team Racing
                     </div>
                     <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">C420 Team Racing Simulator</h1>
-                    <p class="text-xs sm:text-sm text-slate-400">Digital N Course • RRS Part 2 (Rules 10–23), Rule 31, Rule 43 Exonerations & Appendix D (2-BL Zone) • Cross-Device Party</p>
+                    <p class="text-xs sm:text-sm text-slate-400">Digital N Course • Physical Maneuver Execution • Rigid-Body Hull Collisions • Cross-Device Party</p>
                 </div>
                 <div class="text-right">
                     <div class="text-xs font-bold text-slate-400 uppercase">You Helm</div>
@@ -365,10 +365,10 @@
 
                 <div class="bg-slate-900/75 p-3.5 rounded-xl border border-slate-800/90 space-y-1.5">
                     <div class="font-extrabold uppercase text-slate-300 tracking-wider mb-1">
-                        <i class="fa-solid fa-scale-balanced text-emerald-400 mr-1"></i> 2025–2028 RRS When Boats Meet & Exonerations
+                        <i class="fa-solid fa-scale-balanced text-emerald-400 mr-1"></i> Physical Maneuver State Machine & Hull Physics
                     </div>
                     <p class="text-slate-400 leading-relaxed">
-                        Enforces <strong class="text-slate-200">RRS 10–13</strong> (Port/Stbd, W/L, Clear Astern, Tacking), <strong class="text-slate-200">RRS 15–17</strong> (Acquiring ROW, Course Change Room, Ducking & Proper Course), <strong class="text-slate-200">RRS 18 & App. D</strong> (2-BL Zone, 18.2a/b/d, 18.3, D1.1b), <strong class="text-slate-200">RRS 21</strong> (OCS Return & Penalty Spin Keep-Clear), <strong class="text-slate-200">RRS 31</strong> (Active-Leg Mark Touch), and <strong class="text-slate-200">RRS 43</strong> Automatic Exonerations!
+                        Bots execute multi-stage <strong class="text-slate-200">Pinning</strong> (bearing away to windward hip, matching speed, pinching to luff), <strong class="text-slate-200">Mark Traps</strong> (M1 Stbd Hook, M2 Offset Dip, M3 Power-Angle, M4 Inside Lock), <strong class="text-slate-200">Pass-Backs</strong>, and <strong class="text-slate-200">OBB Hull Collisions</strong> with rotational bow/stern lever torque!
                     </p>
                 </div>
             </div>
@@ -404,10 +404,23 @@
         </div>
     </div>
 
-    <!-- MAIN GAME ENGINE, 2025-2028 RRS ENGINE, 10-COMBO PLAYBOOK & 60-SLIDE MANEUVER AI SCRIPT -->
+    <!-- MAIN GAME ENGINE, PHYSICAL MANEUVER AI, RIGID-BODY COLLISIONS & RRS 2025-2028 -->
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+
+        // Safe polyfill for ctx.roundRect on all browsers
+        if (!ctx.roundRect) {
+            ctx.roundRect = function(x, y, w, h, r) {
+                const radius = Math.min(r || 0, w / 2, h / 2);
+                this.moveTo(x + radius, y);
+                this.arcTo(x + w, y, x + w, y + h, radius);
+                this.arcTo(x + w, y + h, x, y + h, radius);
+                this.arcTo(x, y + h, x, y, radius);
+                this.arcTo(x, y, x + w, y, radius);
+                this.closePath();
+            };
+        }
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
@@ -417,11 +430,12 @@
         resizeCanvas();
 
         // World & Course Dimensions (Box-Style Digital N Course)
-        // Per RRS Appendix D1.1(a) (Team Racing Rules), the Zone is 2 Hull Lengths (2 * BOAT_LENGTH).
+        // Per RRS Appendix D1.1(a) (Team Racing Rules), the Zone is 2 Hull Lengths.
         const WORLD_WIDTH = 3400;
         const WORLD_HEIGHT = 2600;
         const BOAT_LENGTH = 44;
-        const ZONE_RADIUS = BOAT_LENGTH * 2.5; // 2-Boat-Length Team Racing Zone scaled for C420 hull+mark clearance
+        const BOAT_BEAM = 19;
+        const ZONE_RADIUS = BOAT_LENGTH * 2.5;
         const THREE_BL_RADIUS = ZONE_RADIUS;
         const MARK_RADIUS = 14;
 
@@ -471,14 +485,15 @@
             puffs: [],
             waves: [],
             boats: [],
+            collisionSparks: [],
             finishOrder: [],
             radioLogs: [],
-            r18PairMatrix: {}, // Keyed by "boatA_boatB_leg" -> stores locked Rule 18 relationship at zone entry
-            r17PairMatrix: {}, // Keyed by "leewardId_windwardId" -> true if leeward boat became overlapped from clear astern within 2 BL (Rule 17)
+            r18PairMatrix: {},
+            r17PairMatrix: {},
             playbookState: {
                 comboTitle: '123 vs 456',
-                BLUE: { callout: 'PAIRS', desc: 'Win Your Pair' },
-                RED:  { callout: 'PAIRS', desc: 'Win Your Pair' },
+                BLUE: { callout: 'PAIRS', desc: 'Win Your Pair', winning: true },
+                RED:  { callout: 'PAIRS', desc: 'Win Your Pair', winning: false },
                 jobsByBoatId: {},
                 lastCalloutKey: ''
             },
@@ -538,7 +553,6 @@
             }).join('');
         }
 
-        // Deterministic PRNG helper
         function createSeededRandom(seed) {
             let s = (seed >>> 0) || 123456789;
             return function() {
@@ -658,10 +672,8 @@
 
         // ============================================================================
         // RRS 2025-2028 DEFINITIONS & GEOMETRY HELPERS
-        // Clear Ahead, Clear Astern, Overlap, Leeward/Windward, Fetching, Proper Course
         // ============================================================================
         function getHullRelation(boatA, boatB) {
-            // Project boatB onto boatA's fore-aft axis (bow = +BOAT_LENGTH/2, transom = -BOAT_LENGTH/2)
             const radA = degToRad(boatA.heading);
             const fwdAx = Math.sin(radA);
             const fwdAy = -Math.cos(radA);
@@ -675,7 +687,6 @@
             const projAOnB = (-dxAB) * fwdBx + (-dyAB) * fwdBy;
 
             const halfHull = BOAT_LENGTH * 0.48;
-            // Boat A is clear astern of B if A's bow is behind a line abeam from B's transom
             const aClearAsternOfB = (projAOnB + halfHull) < -halfHull;
             const bClearAsternOfA = (projBOnA + halfHull) < -halfHull;
             const overlapped = !aClearAsternOfB && !bClearAsternOfA && distBetween(boatA, boatB) < BOAT_LENGTH * 4.2;
@@ -689,32 +700,22 @@
             };
         }
 
-        // RRS Definition: Leeward and Windward
         function getWindwardLeewardRelation(boatA, boatB, windDir) {
-            // For two boats on the same tack, project onto the cross-wind axis perpendicular to their tack
-            // On Starboard tack (wind coming over starboard side), the windward side is to the right (+perp), leeward is to the left (-perp)
-            // On Port tack (wind coming over port side), the windward side is to the left (-perp), leeward is to the right (+perp)
             const wRad = degToRad(windDir);
-            // Vector pointing upwind: (sin(wRad), -cos(wRad))
-            // Vector pointing 90 deg clockwise of wind (Starboard of eye of wind): (cos(wRad), sin(wRad))
             const dx = boatB.x - boatA.x;
             const dy = boatB.y - boatA.y;
             const stbdProj = dx * Math.cos(wRad) + dy * Math.sin(wRad);
             const upwindProj = dx * Math.sin(wRad) - dy * Math.cos(wRad);
 
-            // Upwind projection + tack-aware leeward/windward check
             if (boatA.tack === 'STBD') {
-                // On Starboard tack, wind comes from the right/top-right of the hull; windward boat is further upwind/right
                 const scoreB = upwindProj * 0.65 + stbdProj * 0.75;
                 return scoreB > 0 ? { windward: boatB, leeward: boatA } : { windward: boatA, leeward: boatB };
             } else {
-                // On Port tack, wind comes from the left/top-left of the hull; windward boat is further upwind/left
                 const scoreB = upwindProj * 0.65 - stbdProj * 0.75;
                 return scoreB > 0 ? { windward: boatB, leeward: boatA } : { windward: boatA, leeward: boatB };
             }
         }
 
-        // RRS Definition: Fetching a Mark
         function isBoatFetchingMark(boat, mark, windDir) {
             if (!mark) return false;
             const bearingToMark = radToDeg(Math.atan2(mark.x - boat.x, -(mark.y - boat.y)));
@@ -725,9 +726,8 @@
             return boat.tack === markSign;
         }
 
-        // RRS Definition: Proper Course TWA on the current leg
         function getProperCourseHeading(boat, windDir) {
-            if (gameState.phase !== 'RACING') return null; // RRS Definition: A boat has no proper course before her starting signal
+            if (gameState.phase !== 'RACING') return null;
             const wp = boat.getWaypointForCurrentLeg();
             const directBearing = radToDeg(Math.atan2(wp.x - boat.x, -(wp.y - boat.y)));
             const sign = boat.tack === 'STBD' ? -1 : 1;
@@ -743,53 +743,33 @@
             return directBearing;
         }
 
-        // RRS Rule 31: Check if a mark begins, bounds, or ends the leg of the course on which the boat is sailing
         function isMarkActiveForBoatUnderRule31(boat, mark) {
             if (gameState.phase !== 'RACING' && gameState.phase !== 'PRESTART') return false;
-            if (boat.finished) {
-                // "...or a finishing mark after finishing"
-                return !!mark.isFinishMark;
-            }
-            if (boat.leg === 0) {
-                // "...a starting mark before starting"
-                return !!mark.isStartMark;
-            }
-            if (boat.leg === 1) {
-                return mark.id === 'startPin' || mark.id === 'startRC' || mark.id === 'mark1';
-            }
-            if (boat.leg === 2) {
-                return mark.id === 'mark1' || mark.id === 'mark2';
-            }
-            if (boat.leg === 3) {
-                return mark.id === 'mark2' || mark.id === 'mark3';
-            }
-            if (boat.leg === 4) {
-                return mark.id === 'mark3' || mark.id === 'mark4';
-            }
-            if (boat.leg === 5) {
-                return mark.id === 'mark4' || mark.id === 'finishPin' || mark.id === 'finishRC';
-            }
+            if (boat.finished) return !!mark.isFinishMark;
+            if (boat.leg === 0) return !!mark.isStartMark;
+            if (boat.leg === 1) return mark.id === 'startPin' || mark.id === 'startRC' || mark.id === 'mark1';
+            if (boat.leg === 2) return mark.id === 'mark1' || mark.id === 'mark2';
+            if (boat.leg === 3) return mark.id === 'mark2' || mark.id === 'mark3';
+            if (boat.leg === 4) return mark.id === 'mark3' || mark.id === 'mark4';
+            if (boat.leg === 5) return mark.id === 'mark4' || mark.id === 'finishPin' || mark.id === 'finishRC';
             return false;
         }
 
-        // RRS Rule 18.1: Check when Rule 18 applies between two boats at a mark
         function doesRule18ApplyBetween(boatA, boatB, mark) {
-            if (!mark || mark.isStartMark || mark.isFinishMark) return false; // Section C preamble: no R18 at starting marks
-            if (boatA.leg !== boatB.leg) return false; // 18.1(a)(3): between a boat approaching a mark and one leaving it
-            if (!boatA.inZone && !boatB.inZone) return false; // Neither boat is in the zone
+            if (!mark || mark.isStartMark || mark.isFinishMark) return false;
+            if (boatA.leg !== boatB.leg) return false;
+            if (!boatA.inZone && !boatB.inZone) return false;
 
             const isBeatToWindward = (boatA.leg === 1 || boatA.leg === 5);
             if (boatA.tack !== boatB.tack) {
-                // 18.1(a)(1): does not apply between boats on opposite tacks on a beat to windward
                 if (isBeatToWindward) return false;
-                // 18.1(a)(2): does not apply between boats on opposite tacks when proper course at the mark for one but not both is to tack
                 if (boatA.leg === 4) return false;
             }
             return true;
         }
 
         // ============================================================================
-        // STANDARD 3 ON 3 TEAM RACE PLAYBOOK COORDINATOR (FROM THE 50-SLIDE PLAYBOOK)
+        // STANDARD 3 ON 3 TEAM RACE PLAYBOOK COORDINATOR + WHOLE-RACE INTELLIGENCE
         // ============================================================================
         function evaluatePlaybookStrategies(sortedBoats, rankMap) {
             const jobs = {};
@@ -819,7 +799,7 @@
             gameState.playbookState.comboTitle = comboKey;
 
             const leadBoat = byPlace[1];
-            const firstHalfOfFirstLeg = (leadBoat.leg <= 1 && leadBoat.y > 1420);
+            const firstHalfOfFirstLeg = (leadBoat.leg <= 1 && leadBoat.y > 1520);
             const lastHalfOfLastLeg = (leadBoat.leg === 5 && leadBoat.y < 1180);
 
             let winCallout = 'PLAY 1-D';
@@ -833,7 +813,8 @@
                     targetId: targetPlace && byPlace[targetPlace] ? byPlace[targetPlace].id : null,
                     helperId: helperPlace && byPlace[helperPlace] ? byPlace[helperPlace].id : null,
                     detail,
-                    mode
+                    mode,
+                    place
                 };
             };
 
@@ -851,7 +832,12 @@
                 loseCallout = 'CHASE';
                 assign(1, 'COVER', 4, 2, 'PLAY 1-D: FAST & WEAVE #1', 'WEAVE_1');
                 assign(2, 'COVER', 4, 1, 'PLAY 1-D: FAST & WEAVE #2', 'WEAVE_2');
-                assign(3, 'ATTACK', 4, 2, 'PLAY 1-D: TRAP #4 AT MARK', 'TRAP_GUARD_3');
+                const leadBreakaway = distBetween(byPlace[2], byPlace[4]) > 320;
+                if (leadBreakaway) {
+                    assign(3, 'COVER', 4, 2, 'PLAY 1-D: BREAKAWAY SECURE -> FAST', 'WEAVE_3');
+                } else {
+                    assign(3, 'ATTACK', 4, 2, 'PLAY 1-D: TRAP #4 AT MARK', 'TRAP_GUARD_3');
+                }
                 assign(4, 'CHASE', 3, 5, 'CHASE: OVER-THE-TOP #3', 'HIGH_LOW_HIGH');
                 assign(5, 'CHASE', 3, 4, 'CHASE: LOW BYPASS #3', 'HIGH_LOW_LOW');
                 assign(6, 'CHASE', 3, 5, 'CHASE: SPLIT FAST', 'SPLIT_CHASE');
@@ -884,13 +870,12 @@
                 assign(6, 'CHASE', 5, null, 'PLAY 1-D: CATCH #5 FOR 125', 'SPLIT_CHASE');
             } else if (winRanks === '234') {
                 winCallout = 'PLAY 2-D';
-                const isDesperate = (byPlace[1].leg >= 4);
+                const isDesperate = (byPlace[1].leg >= 3);
                 loseCallout = isDesperate ? 'CHAOS' : 'CHASE';
 
                 const dist1to2 = distBetween(byPlace[1], byPlace[2]);
-                const dist2to3 = distBetween(byPlace[2], byPlace[3]);
-                if (isDesperate || (dist1to2 < 175 && dist2to3 < 155)) {
-                    assign(1, 'ATTACK', 2, 5, 'TWOFUR TRAP ON 2&3!', 'TRAP_DOUBLE');
+                if (isDesperate || dist1to2 < 260) {
+                    assign(1, 'ATTACK', 2, 5, '1-5-6: DROP BACK & TRAP 2&3!', 'TRAP_DOUBLE');
                 } else {
                     assign(1, 'COVER', 2, 5, 'HOLD #1 / COMPRESS PACK', 'LOOSE_COVER');
                 }
@@ -991,7 +976,7 @@
                 const dist4to5 = distBetween(byPlace[4], byPlace[5]);
                 const nearMark = [COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4].some(m => distBetween(byPlace[1], m) < THREE_BL_RADIUS * 1.6);
 
-                const playOffense1A = (nearMark || dist1to2 < 120 || dist2to3 < 115) && !(byPlace[1].leg === 5 && dist4to5 > 230);
+                const playOffense1A = (nearMark || dist1to2 < 135 || dist2to3 < 125) && !(byPlace[1].leg === 5 && dist4to5 > 230);
 
                 if (playOffense1A) {
                     winCallout = 'PLAY 1-A';
@@ -1014,8 +999,8 @@
                 }
             }
 
-            gameState.playbookState[winTeam] = { callout: winCallout };
-            gameState.playbookState[loseTeam] = { callout: loseCallout };
+            gameState.playbookState[winTeam] = { callout: winCallout, winning: true };
+            gameState.playbookState[loseTeam] = { callout: loseCallout, winning: false };
             gameState.playbookState.jobsByBoatId = jobs;
 
             const calloutSignature = `${comboKey}:${winTeam}-${winCallout}:${loseTeam}-${loseCallout}`;
@@ -1032,7 +1017,9 @@
             }
         }
 
-        // Boat Class with RRS 2025-2028 State Tracking
+        // ============================================================================
+        // BOAT CLASS WITH PHYSICAL MANEUVER STATE MACHINE & RIGID-BODY COLLISION PHYSICS
+        // ============================================================================
         class Boat {
             constructor(id, team, isPlayer, x, y, heading) {
                 this.id = id;
@@ -1048,7 +1035,7 @@
                 this.prevY = y;
                 this.heading = heading;
                 this.prevHeading = heading;
-                this.angularVelocity = 0; // deg/s for Rule 16.1 / 16.2 course-change checks
+                this.angularVelocity = 0;
                 this.targetHeading = null;
                 this.speed = 3.8;
                 this.tack = 'STBD';
@@ -1057,9 +1044,15 @@
                 this.signedTwa = -45;
                 this.luffing = false;
                 this.speedMatchCap = null;
+                this.speedFloor = null;
+
+                // Rigid-Body Hull Collision Impulse & Rotational Torque
+                this.knockvx = 0;
+                this.knockvy = 0;
+                this.angularImpulse = 0;
 
                 // Course & Rounding State
-                this.leg = 0; // 0=Prestart/Start, 1=M1, 2=M2, 3=M3, 4=M4, 5=Finish
+                this.leg = 0;
                 this.markApproachStage = 0;
                 this.ocs = false;
                 this.finished = false;
@@ -1074,12 +1067,12 @@
                 this.spinPassedDownwind = false;
                 this.foulCooldown = 0;
 
-                this.isTacking = false;          // Rule 13: Passed head-to-wind until on a close-hauled course
+                this.isTacking = false;
                 this.tackingTimer = 0;
-                this.tackedInZone = false;       // Rule 18.2(b) / 18.3: Tacked from port to starboard inside the zone
-                this.d11bClearAsternTack = false;// Appendix D1.1(b)(3): Passed head to wind clear astern of a boat in the zone
-                this.justAcquiredRowTimer = 0;   // Rule 15: Initially give room after acquiring right-of-way
-                this.lastCompelledBy = null;     // Rule 43.1(a): Boat that compelled this boat to break a rule
+                this.tackedInZone = false;
+                this.d11bClearAsternTack = false;
+                this.justAcquiredRowTimer = 0;
+                this.lastCompelledBy = null;
                 this.lastCompelledTimer = 0;
 
                 // Aerodynamic & Rule 18 State
@@ -1093,6 +1086,8 @@
                 this.aiTackCooldown = 0;
                 this.pinTimer = 0;
                 this.trapHoldTimer = 0;
+                this.escapeStage = 0;
+                this.escapeStageTimer = 0;
 
                 this.wake = [];
             }
@@ -1105,7 +1100,7 @@
                 const newSign = rel >= 0 ? -1 : 1;
                 const targetAbs = Math.max(40, Math.min(55, Math.abs(rel) || 42));
                 this.targetHeading = wrapAngle180(effWindDir + newSign * targetAbs);
-                this.aiTackCooldown = 2.6;
+                this.aiTackCooldown = 2.4;
             }
 
             triggerGybe() {
@@ -1116,7 +1111,7 @@
                 const newSign = rel >= 0 ? -1 : 1;
                 const targetAbs = Math.max(138, Math.min(162, Math.abs(rel) < 120 ? 148 : Math.abs(rel)));
                 this.targetHeading = wrapAngle180(effWindDir + newSign * targetAbs);
-                this.aiTackCooldown = 2.6;
+                this.aiTackCooldown = 2.4;
             }
 
             triggerPenaltySpin() {
@@ -1149,33 +1144,55 @@
                     return { x: laneX, y: COURSE.startPin.y - 65 };
                 }
                 if (this.leg === 1) {
-                    if (this.y > COURSE.mark1.y + 42) {
-                        return { x: COURSE.mark1.x - 42, y: COURSE.mark1.y - 10 };
+                    if (this.y > COURSE.mark1.y + 38) {
+                        return { x: COURSE.mark1.x - 45, y: COURSE.mark1.y - 8 };
                     }
-                    return { x: COURSE.mark1.x + 48, y: COURSE.mark1.y - 38 };
+                    return { x: COURSE.mark1.x + 48, y: COURSE.mark1.y - 34 };
                 }
                 if (this.leg === 2) {
                     if (this.x < COURSE.mark2.x + 15) {
-                        return { x: COURSE.mark2.x + 38, y: COURSE.mark2.y - 36 };
+                        return { x: COURSE.mark2.x + 40, y: COURSE.mark2.y - 36 };
                     }
-                    return { x: COURSE.mark2.x + 44, y: COURSE.mark2.y + 52 };
+                    return { x: COURSE.mark2.x + 42, y: COURSE.mark2.y + 52 };
                 }
                 if (this.leg === 3) {
                     if (this.y < COURSE.mark3.y - 12) {
-                        return { x: COURSE.mark3.x - 42, y: COURSE.mark3.y + 34 };
+                        return { x: COURSE.mark3.x - 44, y: COURSE.mark3.y + 34 };
                     }
-                    return { x: COURSE.mark3.x + 48, y: COURSE.mark3.y + 44 };
+                    return { x: COURSE.mark3.x + 46, y: COURSE.mark3.y + 40 };
                 }
                 if (this.leg === 4) {
                     if (this.x < COURSE.mark4.x + 12) {
                         return { x: COURSE.mark4.x + 42, y: COURSE.mark4.y + 40 };
                     }
-                    return { x: COURSE.mark4.x + 42, y: COURSE.mark4.y - 50 };
+                    return { x: COURSE.mark4.x + 36, y: COURSE.mark4.y - 52 };
                 }
                 return {
                     x: (COURSE.finishPin.x + COURSE.finishRC.x) * 0.5,
                     y: COURSE.finishPin.y - 30
                 };
+            }
+
+            findBestPuffAdjustedTarget(baseWp, effWindDir) {
+                let bestX = baseWp.x;
+                let bestY = baseWp.y;
+                let bestScore = 0;
+
+                for (const p of gameState.puffs) {
+                    if (p.isLull) continue;
+                    const d = Math.hypot(p.x - this.x, p.y - this.y);
+                    if (d > 480 || d < 40) continue;
+                    const dotToWp = (p.x - this.x) * (baseWp.x - this.x) + (p.y - this.y) * (baseWp.y - this.y);
+                    if (dotToWp <= 0) continue;
+
+                    const score = (p.deltaSpeed * 18) / (1 + d * 0.004);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestX = baseWp.x * 0.65 + p.x * 0.35;
+                        bestY = baseWp.y * 0.65 + p.y * 0.35;
+                    }
+                }
+                return { x: bestX, y: bestY };
             }
 
             update(dt, rankMap) {
@@ -1188,18 +1205,22 @@
                 if (this.foulCooldown > 0) this.foulCooldown -= dt;
                 if (this.aiTackCooldown > 0) this.aiTackCooldown -= dt;
                 if (this.justAcquiredRowTimer > 0) this.justAcquiredRowTimer -= dt;
+                if (this.escapeStageTimer > 0) {
+                    this.escapeStageTimer -= dt;
+                    if (this.escapeStageTimer <= 0) this.escapeStage = 0;
+                }
                 if (this.lastCompelledTimer > 0) {
                     this.lastCompelledTimer -= dt;
                     if (this.lastCompelledTimer <= 0) this.lastCompelledBy = null;
                 }
                 this.speedMatchCap = null;
+                this.speedFloor = null;
 
                 const assignedPlay = gameState.playbookState.jobsByBoatId[this.id];
                 if (assignedPlay) {
                     this.jobType = assignedPlay.job;
                 }
 
-                // Remote human or host-synced boats are driven by network interpolation
                 if (this.isRemoteHuman && !this.isPlayer) {
                     const rem = mpState.remotePlayers[this.id];
                     if (rem) {
@@ -1240,8 +1261,6 @@
                     return;
                 }
 
-                // RRS Rule 44.2: One-Turn and Two-Turns Penalties
-                // Each turn must be in the same direction and include one tack (passing head-to-wind) and one gybe (passing dead-downwind).
                 if (this.spinning) {
                     const spinRate = 160;
                     const step = spinRate * dt;
@@ -1249,7 +1268,6 @@
                     this.heading = wrapAngle180(this.heading + this.spinDir * step);
                     const newSignedTwa = wrapAngle180(this.heading - effWindDir);
 
-                    // Detect tack (crossing 0 deg TWA) and gybe (crossing +/- 180 deg TWA) during the spin
                     if (Math.sign(prevSignedTwa) !== Math.sign(newSignedTwa)) {
                         if (Math.abs(newSignedTwa) < 90) {
                             this.spinPassedHeadToWind = true;
@@ -1274,7 +1292,11 @@
                     this.updateBotAI(dt, localWind, effWindDir, rankMap, assignedPlay);
                 }
 
-                // Track angular velocity (deg/s) for Rule 16.1 / 16.2 course-change checks
+                if (Math.abs(this.angularImpulse) > 0.1) {
+                    this.heading = wrapAngle180(this.heading + this.angularImpulse * dt);
+                    this.angularImpulse *= Math.pow(0.06, dt);
+                }
+
                 this.angularVelocity = dt > 0.0001 ? angleDiff(this.heading, this.prevHeading) / dt : 0;
 
                 const prevSigned = this.signedTwa;
@@ -1282,8 +1304,6 @@
                 this.twa = Math.abs(this.signedTwa);
                 this.tack = this.signedTwa <= 0 ? 'STBD' : 'PORT';
 
-                // RRS Rule 13 (While Tacking) & Rule 18.2(b) / 18.3 / Appendix D1.1(b)(3):
-                // Detect passing head-to-wind (crossing 0 deg TWA when |TWA| < 75)
                 const passedHeadToWind = (Math.sign(prevSigned) !== Math.sign(this.signedTwa)) && this.twa < 75 && !this.spinning;
                 if (passedHeadToWind) {
                     this.isTacking = true;
@@ -1293,38 +1313,42 @@
 
                 if (this.isTacking) {
                     this.tackingTimer -= dt;
-                    // Rule 13 applies until the boat is on a close-hauled course (~40-48 deg TWA)
                     if (this.twa >= 39 || this.tackingTimer <= 0) {
                         this.isTacking = false;
                         this.tackingTimer = 0;
-                        // Rule 15: If she completed a tack onto Starboard tack, she just acquired right-of-way!
                         if (this.tack === 'STBD') {
                             this.justAcquiredRowTimer = 1.25;
                         }
                     }
                 } else if (this.prevTack !== this.tack && this.twa > 105 && this.tack === 'STBD') {
-                    // Completed a gybe onto Starboard tack -> Rule 15 newly acquired right-of-way
                     this.justAcquiredRowTimer = 1.25;
                 }
 
                 const effWindSpeed = localWind.speed * (1 - this.shadowFactor * 0.42);
                 let targetSpeed = getC420PolarSpeed(this.twa, effWindSpeed);
 
-                if (this.luffing) targetSpeed *= 0.34;
+                if (this.luffing) targetSpeed *= 0.32;
                 if (this.spinning) targetSpeed *= 0.48;
-                if (this.leeBowedBy) targetSpeed *= 0.72;
+                if (this.leeBowedBy) targetSpeed *= 0.68;
                 if (this.penalties > 0 && !this.spinning) targetSpeed *= 0.75;
                 if (this.speedMatchCap !== null) {
                     targetSpeed = Math.min(targetSpeed, this.speedMatchCap);
                 }
+                if (this.speedFloor !== null) {
+                    targetSpeed = Math.max(targetSpeed, this.speedFloor);
+                }
 
-                const accelRate = targetSpeed > this.speed ? 2.2 : 2.8;
+                const accelRate = targetSpeed > this.speed ? 2.3 : 3.2;
                 this.speed += (targetSpeed - this.speed) * Math.min(1, dt * accelRate);
 
                 const rad = degToRad(this.heading);
                 const pxPerKnot = 14.2;
-                this.x += Math.sin(rad) * this.speed * pxPerKnot * dt;
-                this.y -= Math.cos(rad) * this.speed * pxPerKnot * dt;
+                this.x += (Math.sin(rad) * this.speed * pxPerKnot + this.knockvx) * dt;
+                this.y += (-Math.cos(rad) * this.speed * pxPerKnot + this.knockvy) * dt;
+
+                const knockDamp = Math.pow(0.04, dt);
+                this.knockvx *= knockDamp;
+                this.knockvy *= knockDamp;
 
                 this.x = Math.max(80, Math.min(WORLD_WIDTH - 80, this.x));
                 this.y = Math.max(80, Math.min(WORLD_HEIGHT - 80, this.y));
@@ -1368,33 +1392,47 @@
                 }
             }
 
-            // ============================================================================
-            // SMART BOT AI: 10-COMBO PLAYBOOK + 60-SLIDE TEAM RACE MANEUVERS & RRS AVOIDANCE
-            // ============================================================================
             updateBotAI(dt, localWind, effWindDir, rankMap, assignedPlay) {
                 this.luffing = false;
                 this.roleBadge = assignedPlay ? assignedPlay.detail : 'SAIL FAST';
 
-                // 1. Exonerate immediately if carrying a penalty outside the 2-BL zone (and well clear of other boats per Rule 44.2)
                 if (this.penalties > 0 && gameState.phase === 'RACING' && !this.inZone) {
-                    this.roleBadge = 'TAKING PENALTY (RRS 44.2)';
-                    this.triggerPenaltySpin();
-                    return;
+                    let clearOfBoats = true;
+                    for (const o of gameState.boats) {
+                        if (o !== this && o.activeInRace && !o.finished && distBetween(this, o) < BOAT_LENGTH * 1.35) {
+                            clearOfBoats = false;
+                            break;
+                        }
+                    }
+                    if (clearOfBoats) {
+                        this.roleBadge = 'TAKING PENALTY (RRS 44.2)';
+                        this.triggerPenaltySpin();
+                        return;
+                    }
                 }
 
-                // 2. Pre-Start Geographic Line Setup & Out-of-Phase Hook / Post-Up
                 if (gameState.phase === 'PRESTART') {
                     const slotIdx = ['B1', 'R1', 'B2', 'R2', 'B3', 'R3'].indexOf(this.id);
                     const targetX = COURSE.startPin.x + 75 + slotIdx * 72;
                     const lineY = COURSE.startPin.y;
 
+                    const pairedOpp = gameState.boats.find(o => o.activeInRace && o.team !== this.team && Math.abs(o.x - this.x) < 120);
+
                     if (gameState.timer > 11) {
-                        const holdY = lineY + 115 + (slotIdx % 2) * 35;
-                        const desiredDir = radToDeg(Math.atan2(targetX - this.x, -(holdY - this.y)));
-                        this.steerWithLaylines(desiredDir, effWindDir, dt, false);
-                        this.roleBadge = 'PRE-START GEOGRAPHIC ZONE';
+                        const holdY = lineY + 110 + (slotIdx % 2) * 32;
+                        if (pairedOpp && this.y > pairedOpp.y + 8 && distBetween(this, pairedOpp) < 95) {
+                            const hookTargetX = pairedOpp.x - 24;
+                            const hookTargetY = pairedOpp.y + 6;
+                            const hookDir = radToDeg(Math.atan2(hookTargetX - this.x, -(hookTargetY - this.y)));
+                            this.steerDirectly(hookDir, dt, 78);
+                            this.roleBadge = `PRE-START HOOK ON ${pairedOpp.id}`;
+                        } else {
+                            const desiredDir = radToDeg(Math.atan2(targetX - this.x, -(holdY - this.y)));
+                            this.steerWithLaylines(desiredDir, effWindDir, dt, false);
+                            this.roleBadge = 'PRE-START GEOGRAPHIC ZONE';
+                        }
                     } else {
-                        const safeTargetY = lineY + 16;
+                        const safeTargetY = lineY + 15;
                         if (this.y < lineY + 8) {
                             const dipDir = radToDeg(Math.atan2(targetX - this.x, -((lineY + 38) - this.y)));
                             this.steerDirectly(dipDir, dt, 85);
@@ -1402,20 +1440,20 @@
                         } else {
                             const distToLine = this.y - safeTargetY;
                             const closeHauledStbd = wrapAngle180(effWindDir - 42);
-                            this.steerDirectly(closeHauledStbd, dt, 72);
-                            if (distToLine < 26 && gameState.timer > 1.8) {
+                            this.steerDirectly(closeHauledStbd, dt, 75);
+                            if (distToLine < 30 && gameState.timer > 2.6) {
                                 this.luffing = true;
                                 this.roleBadge = 'LUFFING ON LINE';
                             } else {
-                                this.roleBadge = 'FINAL START ACCEL';
+                                this.luffing = false;
+                                this.roleBadge = 'SHEET IN! FULL SPEED AT GUN';
                             }
                         }
                     }
-                    this.applyRightOfWayAvoidance(effWindDir, dt);
+                    this.applyRightOfWayAvoidance(effWindDir, dt, false);
                     return;
                 }
 
-                // 3. Individual Recall OCS Dipping (Rule 21.1 keep clear while returning)
                 if (this.ocs) {
                     this.roleBadge = 'RETURNING TO START (R21.1)';
                     const slotIdx = ['B1', 'R1', 'B2', 'R2', 'B3', 'R3'].indexOf(this.id);
@@ -1423,11 +1461,10 @@
                     const dipTarget = { x: laneX, y: COURSE.startPin.y + 45 };
                     const dirToDip = radToDeg(Math.atan2(dipTarget.x - this.x, -(dipTarget.y - this.y)));
                     this.steerDirectly(dirToDip, dt, 85);
-                    this.applyRightOfWayAvoidance(effWindDir, dt);
+                    this.applyRightOfWayAvoidance(effWindDir, dt, false);
                     return;
                 }
 
-                // 4. Mandatory Physical Start Line Crossing (Leg 0 -> Leg 1)
                 if (this.leg === 0) {
                     this.roleBadge = 'CROSSING START LINE';
                     const startWp = this.getWaypointForCurrentLeg();
@@ -1437,13 +1474,14 @@
                     } else {
                         this.steerWithLaylines(dirToStart, effWindDir, dt, false);
                     }
-                    this.applyRightOfWayAvoidance(effWindDir, dt);
+                    this.applyRightOfWayAvoidance(effWindDir, dt, false);
                     return;
                 }
 
-                // 5. Execute Playbook Job + 60-Slide Maneuver Mechanics
-                const wp = this.getWaypointForCurrentLeg();
+                const rawWp = this.getWaypointForCurrentLeg();
+                const wp = this.findBestPuffAdjustedTarget(rawWp, effWindDir);
                 let desiredCourse = radToDeg(Math.atan2(wp.x - this.x, -(wp.y - this.y)));
+                let directManeuverHeading = null;
 
                 const targetBoat = assignedPlay && assignedPlay.targetId
                     ? gameState.boats.find(b => b.id === assignedPlay.targetId && b.activeInRace && !b.finished)
@@ -1454,237 +1492,361 @@
 
                 const job = assignedPlay ? assignedPlay.job : 'CHASE';
                 const mode = assignedPlay ? assignedPlay.mode : 'NORMAL';
+                const myPlace = rankMap.get(this.id) || 3;
+                const teamIsWinning = !!gameState.playbookState[this.team]?.winning;
                 const isUpwind = (this.leg === 1 || this.leg === 5);
                 const isDownwind = (this.leg === 3);
+                const activeMark = this.getActiveRoundingMark();
+                const distToMark = activeMark ? distBetween(this, activeMark) : 999;
 
-                // --- JOB 1: COVER ---
+                let abortSlowPlayForFinish = false;
+                if (this.leg === 5 && teamIsWinning && this.y < COURSE.finishPin.y + 360) {
+                    const beneficiaryClose = helperBoat && distBetween(this, helperBoat) < 125;
+                    if (!beneficiaryClose) {
+                        abortSlowPlayForFinish = true;
+                    }
+                }
+
+                // JOB 1: COVER
                 if (job === 'COVER' && targetBoat) {
                     const dTarget = distBetween(this, targetBoat);
 
-                    if (this.leg === 5 && this.y > COURSE.mark4.y - 240) {
-                        if (mode === 'WEAVE_1' && this.tack === 'PORT' && this.y < COURSE.mark4.y - 75 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                    if (this.leg === 5 && this.y > COURSE.mark4.y - 260) {
+                        if (mode === 'WEAVE_1' && this.tack === 'PORT' && this.y < COURSE.mark4.y - 70 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                            this.roleBadge = 'WEAVE #1: TACK TO STBD LANE';
                             this.triggerTack();
-                        } else if (mode === 'WEAVE_2' && this.tack === 'PORT' && this.y < COURSE.mark4.y - 125 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                        } else if (mode === 'WEAVE_2' && this.tack === 'PORT' && this.y < COURSE.mark4.y - 135 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                            this.roleBadge = 'WEAVE #2: TACK TO MIDDLE LANE';
                             this.triggerTack();
                         }
                     }
 
                     if (isUpwind) {
-                        const coverX = targetBoat.x * 0.65 + wp.x * 0.35;
-                        const coverY = Math.min(this.y - 60, targetBoat.y - 75);
-                        desiredCourse = radToDeg(Math.atan2(coverX - this.x, -(coverY - this.y)));
+                        const windRad = degToRad(effWindDir);
+                        const idealCoverX = targetBoat.x + Math.sin(windRad) * 68;
+                        const idealCoverY = targetBoat.y - Math.cos(windRad) * 68;
+                        desiredCourse = radToDeg(Math.atan2(idealCoverX - this.x, -(idealCoverY - this.y)));
 
-                        if (Math.abs(this.x - targetBoat.x) > 110 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
-                            if ((targetBoat.x > this.x && this.tack === 'STBD') || (targetBoat.x < this.x && this.tack === 'PORT')) {
+                        if (this.tack !== targetBoat.tack && Math.abs(this.x - targetBoat.x) < 180 && this.y < targetBoat.y + 10) {
+                            if (this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                                this.roleBadge = `COVER TACK ON ${targetBoat.id}`;
                                 this.triggerTack();
                             }
-                        }
-
-                        if (mode === 'PIGGY_GUARD' && helperBoat) {
-                            const d2to3 = distBetween(targetBoat, helperBoat);
-                            if (dTarget > d2to3 * 0.85 && dTarget < 190) {
-                                this.luffing = true;
+                        } else if (this.tack === targetBoat.tack && this.y < targetBoat.y - 15 && dTarget < 165) {
+                            const lateralErr = (idealCoverX - this.x) * (this.tack === 'STBD' ? 1 : -1);
+                            const baseCH = wrapAngle180(effWindDir + (this.tack === 'STBD' ? -42 : 42));
+                            if (Math.abs(idealCoverX - this.x) > 14 && Math.abs(idealCoverX - this.x) < 95) {
+                                const adjustTwa = lateralErr > 0 ? 37 : 48;
+                                directManeuverHeading = wrapAngle180(effWindDir + (this.tack === 'STBD' ? -adjustTwa : adjustTwa));
+                                this.roleBadge = `SLIDING INTO COVER ON ${targetBoat.id}`;
+                            } else {
+                                directManeuverHeading = baseCH;
                             }
-                        } else if (mode === 'TIGHT_COVER' && dTarget < 88 && this.y < targetBoat.y - 12) {
-                            this.luffing = true;
-                            this.speedMatchCap = targetBoat.speed + 0.15;
+
+                            if (mode === 'PIGGY_GUARD' && helperBoat) {
+                                const d2to3 = distBetween(targetBoat, helperBoat);
+                                if (dTarget > d2to3 * 0.78 && dTarget < 210) {
+                                    this.luffing = true;
+                                    this.speedMatchCap = targetBoat.speed * 0.92;
+                                    this.roleBadge = `PIGGY-IN-MIDDLE GUARD ON ${targetBoat.id}`;
+                                }
+                            } else if (mode === 'TIGHT_COVER' && dTarget < 105 && !abortSlowPlayForFinish) {
+                                this.luffing = true;
+                                this.speedMatchCap = targetBoat.speed + 0.1;
+                                this.roleBadge = `BLANKETING ${targetBoat.id}`;
+                            }
                         }
                     } else if (isDownwind) {
-                        const clearOffsetX = (rankMap.get(this.id) % 2 === 0) ? 55 : -45;
+                        const clearOffsetX = (myPlace % 2 === 0) ? 55 : -45;
                         desiredCourse = radToDeg(Math.atan2((wp.x + clearOffsetX) - this.x, -(wp.y - this.y)));
                     }
                 }
 
-                // --- JOB 2: ATTACK (6 Digital N Maneuvers) ---
-                else if (job === 'ATTACK' && targetBoat) {
+                // JOB 2: ATTACK
+                else if (job === 'ATTACK' && targetBoat && !abortSlowPlayForFinish) {
                     const dTarget = distBetween(this, targetBoat);
-                    const activeMark = this.getActiveRoundingMark();
-                    const distToMark = activeMark ? distBetween(this, activeMark) : 999;
 
-                    if (dTarget > BOAT_LENGTH * 3.6 && distToMark > THREE_BL_RADIUS * 1.6) {
-                        this.speedMatchCap = targetBoat.speed * 0.86;
-                        this.roleBadge = `WAITING FOR ${targetBoat.id} (3.5 BL)`;
+                    const isAheadOfTarget = (
+                        (isUpwind && this.y < targetBoat.y - 14) ||
+                        (isDownwind && this.y > targetBoat.y + 14) ||
+                        ((this.leg === 2 || this.leg === 4) && this.x > targetBoat.x + 14)
+                    );
+
+                    if (isAheadOfTarget && dTarget > BOAT_LENGTH * 2.4 && distToMark > THREE_BL_RADIUS * 1.4) {
+                        this.luffing = true;
+                        this.speedMatchCap = Math.max(1.8, targetBoat.speed * 0.62);
+                        this.roleBadge = `WAITING TO TRAP ${targetBoat.id}`;
                     }
 
                     if (mode === 'CHAOS_TURTLE' && isUpwind) {
                         if (this.aiTackCooldown <= 0 && this.canSafelyTack()) {
                             this.triggerTack();
                         }
-                    }
-                    else if (this.leg === 1 && distToMark < THREE_BL_RADIUS * 1.65 && dTarget < 165) {
+                    } else if (this.leg === 1 && distToMark < THREE_BL_RADIUS * 2.1 && dTarget < 210) {
                         if (!this.inZone) {
-                            const hookX = targetBoat.x - 16;
-                            const hookY = targetBoat.y - 10;
-                            desiredCourse = radToDeg(Math.atan2(hookX - this.x, -(hookY - this.y)));
-                            if (dTarget < 78) {
+                            const setupX = Math.min(COURSE.mark1.x - 18, targetBoat.x - 14);
+                            const setupY = Math.max(COURSE.mark1.y + THREE_BL_RADIUS * 0.85, targetBoat.y - 8);
+                            directManeuverHeading = radToDeg(Math.atan2(setupX - this.x, -(setupY - this.y)));
+                            if (dTarget < 115 && this.y < targetBoat.y + 18) {
                                 this.luffing = true;
-                                this.speedMatchCap = targetBoat.speed * 0.85;
-                                this.roleBadge = `M1 STBD HOOK ON ${targetBoat.id}`;
+                                this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.72);
+                                this.roleBadge = `M1 STBD HOOK ON ${targetBoat.id}!`;
                             }
                         } else {
-                            const trapX = COURSE.mark1.x - 24;
-                            const trapY = COURSE.mark1.y - 32;
-                            desiredCourse = radToDeg(Math.atan2(trapX - this.x, -(trapY - this.y)));
+                            const pastMarkX = COURSE.mark1.x - 28;
+                            const pastMarkY = COURSE.mark1.y - 42;
+                            const headToWindStbd = wrapAngle180(effWindDir - 14);
+                            directManeuverHeading = (this.y < COURSE.mark1.y + 18)
+                                ? headToWindStbd
+                                : radToDeg(Math.atan2(pastMarkX - this.x, -(pastMarkY - this.y)));
                             this.luffing = true;
-                            this.speedMatchCap = targetBoat.speed * 0.92;
-                            this.roleBadge = `M1 INSIDE TRAP ${targetBoat.id}`;
-                        }
-                    }
-                    else if (this.leg === 2 && distToMark < THREE_BL_RADIUS * 1.7 && dTarget < 175) {
-                        this.trapHoldTimer += dt;
-                        const dipY = this.inZone ? (COURSE.mark2.y - 52) : (COURSE.mark2.y + 18);
-                        const trapX = COURSE.mark2.x - 28;
-                        desiredCourse = radToDeg(Math.atan2(trapX - this.x, -(dipY - this.y)));
-                        if (dTarget < 110 && this.trapHoldTimer < 6.0) {
-                            this.luffing = true;
-                            this.speedMatchCap = targetBoat.speed * 0.95;
-                            this.roleBadge = mode === 'TRAP_DOUBLE' ? `M2 TWOFUR TRAP!` : `M2 OFFSET TRAP ${targetBoat.id}`;
-                        } else {
-                            this.trapHoldTimer = 0;
-                        }
-                    }
-                    else if (this.leg === 3 && distToMark < THREE_BL_RADIUS * 1.75 && dTarget < 175) {
-                        this.trapHoldTimer += dt;
-                        const safeDistFromMark = Math.min(THREE_BL_RADIUS * 0.78, 85);
-                        const powerAngleX = COURSE.mark3.x - safeDistFromMark * 0.65;
-                        const powerAngleY = COURSE.mark3.y - safeDistFromMark * 0.35;
-                        desiredCourse = radToDeg(Math.atan2(powerAngleX - this.x, -(powerAngleY - this.y)));
-                        if (dTarget < 115 && this.trapHoldTimer < 5.5) {
-                            this.luffing = true;
-                            this.speedMatchCap = targetBoat.speed * 0.92;
-                            this.roleBadge = `M3 POWER-ANGLE TRAP ${targetBoat.id}`;
-                        }
-                    }
-                    else if (this.leg === 4 && distToMark < THREE_BL_RADIUS * 1.75 && dTarget < 175) {
-                        const m4TrapX = COURSE.mark4.x - 18;
-                        const m4TrapY = COURSE.mark4.y + 32;
-                        desiredCourse = radToDeg(Math.atan2(m4TrapX - this.x, -(m4TrapY - this.y)));
-                        if (dTarget < 105) {
-                            this.luffing = true;
-                            this.speedMatchCap = targetBoat.speed * 0.94;
-                            this.roleBadge = `M4 OFFSET TRAP ${targetBoat.id}`;
-                        }
-                    }
-                    else if (isUpwind) {
-                        if (this.tack !== targetBoat.tack && dTarget < 160) {
-                            const interceptX = targetBoat.x + (this.tack === 'STBD' ? -18 : 18);
-                            const interceptY = targetBoat.y - 12;
-                            desiredCourse = radToDeg(Math.atan2(interceptX - this.x, -(interceptY - this.y)));
-                            this.roleBadge = `CUTTING OFF ${targetBoat.id} ESCAPE`;
-                        } else {
-                            const windShiftSign = this.tack === 'STBD' ? 1 : -1;
-                            const idealPinX = targetBoat.x + windShiftSign * 24;
-                            const idealPinY = targetBoat.y - 16;
-                            desiredCourse = radToDeg(Math.atan2(idealPinX - this.x, -(idealPinY - this.y)));
+                            this.speedMatchCap = Math.max(1.5, targetBoat.speed * 0.82);
+                            this.roleBadge = `M1 TRAP: DRIVING ${targetBoat.id} HIGH!`;
 
-                            if (dTarget < 88) {
-                                this.luffing = true;
-                                this.speedMatchCap = Math.max(2.2, targetBoat.speed * 0.98);
-                                this.roleBadge = `PIN & BLANKET ${targetBoat.id}`;
+                            if (helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark1.x - 10 && helperBoat.y < COURSE.mark1.y + 25))) {
+                                directManeuverHeading = radToDeg(Math.atan2((COURSE.mark1.x + 42) - this.x, -((COURSE.mark1.y - 32) - this.y)));
+                                this.luffing = false;
+                                this.speedMatchCap = null;
+                                this.roleBadge = `M1 TRAP COMPLETE -> BEAR OFF!`;
                             }
                         }
-                    }
-                    else {
-                        // Respect Rule 17 if restricted to Proper Course while overlapped to leeward from clear astern
+                    } else if (this.leg === 2 && distToMark < THREE_BL_RADIUS * 2.1 && dTarget < 220) {
+                        this.trapHoldTimer += dt;
+                        if (this.x < COURSE.mark2.x - 22 && !this.inZone) {
+                            const dipX = COURSE.mark2.x - 35;
+                            const dipY = COURSE.mark2.y + 28;
+                            directManeuverHeading = radToDeg(Math.atan2(dipX - this.x, -(dipY - this.y)));
+                            if (dTarget < 115 && this.x > targetBoat.x - 10) {
+                                this.luffing = true;
+                                this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.68);
+                                this.roleBadge = `M2 DIP & STALL FOR ${targetBoat.id}`;
+                            }
+                        } else {
+                            const luffHighX = COURSE.mark2.x + 10;
+                            const luffHighY = COURSE.mark2.y - 58;
+                            directManeuverHeading = radToDeg(Math.atan2(luffHighX - this.x, -(luffHighY - this.y)));
+                            this.luffing = true;
+                            this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.88);
+                            this.roleBadge = mode === 'TRAP_DOUBLE' ? `M2 TWOFUR TRAP ON ${targetBoat.id}!` : `M2 LUFFING ${targetBoat.id} WIDE!`;
+
+                            const teammatePassed = helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark2.x && helperBoat.y > COURSE.mark2.y));
+                            if (teammatePassed || this.trapHoldTimer > 5.8) {
+                                this.trapHoldTimer = 0;
+                                directManeuverHeading = null;
+                                this.luffing = false;
+                                this.speedMatchCap = null;
+                            }
+                        }
+                    } else if (this.leg === 3 && distToMark < THREE_BL_RADIUS * 2.1 && dTarget < 220) {
+                        this.trapHoldTimer += dt;
+                        if (!this.inZone) {
+                            const paX = COURSE.mark3.x - 52;
+                            const paY = COURSE.mark3.y - 28;
+                            directManeuverHeading = radToDeg(Math.atan2(paX - this.x, -(paY - this.y)));
+                            if (dTarget < 120 && this.y > targetBoat.y - 10) {
+                                this.luffing = true;
+                                this.speedMatchCap = Math.max(1.7, targetBoat.speed * 0.72);
+                                this.roleBadge = `M3 POWER-ANGLE SETUP ON ${targetBoat.id}`;
+                            }
+                        } else {
+                            const drivePastX = COURSE.mark3.x - 58;
+                            const drivePastY = COURSE.mark3.y + 38;
+                            directManeuverHeading = radToDeg(Math.atan2(drivePastX - this.x, -(drivePastY - this.y)));
+                            this.luffing = true;
+                            this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.85);
+                            this.roleBadge = `M3 TRAP: DRIVING ${targetBoat.id} PAST MARK!`;
+
+                            const teammatePassed = helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark3.x + 12 && helperBoat.y > COURSE.mark3.y - 20));
+                            if (teammatePassed || this.trapHoldTimer > 5.2) {
+                                this.trapHoldTimer = 0;
+                                directManeuverHeading = radToDeg(Math.atan2((COURSE.mark3.x + 45) - this.x, -((COURSE.mark3.y + 38) - this.y)));
+                                this.luffing = false;
+                                this.speedMatchCap = null;
+                            }
+                        }
+                    } else if (this.leg === 4 && distToMark < THREE_BL_RADIUS * 2.0 && dTarget < 210) {
+                        this.trapHoldTimer += dt;
+                        const m4WideX = COURSE.mark4.x + 28;
+                        const m4WideY = COURSE.mark4.y + 46;
+                        directManeuverHeading = radToDeg(Math.atan2(m4WideX - this.x, -(m4WideY - this.y)));
+                        if (dTarget < 110) {
+                            this.luffing = true;
+                            this.speedMatchCap = Math.max(1.7, targetBoat.speed * 0.82);
+                            this.roleBadge = `M4 TRAP: FORCING ${targetBoat.id} LOW!`;
+                        }
+                        const teammatePassed = helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark4.x + 10 && helperBoat.y < COURSE.mark4.y));
+                        if (teammatePassed || this.trapHoldTimer > 5.0) {
+                            this.trapHoldTimer = 0;
+                            directManeuverHeading = null;
+                            this.luffing = false;
+                            this.speedMatchCap = null;
+                        }
+                    } else if (isUpwind) {
+                        if (this.tack !== targetBoat.tack && dTarget < 210) {
+                            const interceptX = targetBoat.x + (this.tack === 'STBD' ? -18 : 18);
+                            const interceptY = targetBoat.y - 18;
+                            directManeuverHeading = radToDeg(Math.atan2(interceptX - this.x, -(interceptY - this.y)));
+                            this.roleBadge = `INTERCEPTING ${targetBoat.id} ESCAPE`;
+                            if (this.tack === 'PORT' && dTarget < 72 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                                this.triggerTack();
+                            }
+                        } else if (this.tack === targetBoat.tack && dTarget < 220) {
+                            const windwardSign = this.tack === 'STBD' ? 1 : -1;
+                            const pinHipX = targetBoat.x + windwardSign * 26;
+                            const pinHipY = targetBoat.y - 12;
+                            const distToHip = Math.hypot(pinHipX - this.x, pinHipY - this.y);
+
+                            if (distToHip > 24) {
+                                directManeuverHeading = radToDeg(Math.atan2(pinHipX - this.x, -(pinHipY - this.y)));
+                                const relToWind = wrapAngle180(directManeuverHeading - effWindDir);
+                                const sign = this.tack === 'STBD' ? -1 : 1;
+                                const clampedTwa = Math.max(33, Math.min(72, Math.abs(relToWind)));
+                                directManeuverHeading = wrapAngle180(effWindDir + sign * clampedTwa);
+                                this.roleBadge = `BEARING DOWN TO PIN ${targetBoat.id}`;
+                                if (this.y < targetBoat.y - 22) {
+                                    this.luffing = true;
+                                    this.speedMatchCap = Math.max(1.8, targetBoat.speed * 0.72);
+                                }
+                            } else {
+                                const tackSign = this.tack === 'STBD' ? -1 : 1;
+                                directManeuverHeading = wrapAngle180(effWindDir + tackSign * 38);
+                                this.luffing = true;
+                                this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.94);
+                                this.roleBadge = `LOCKED PIN & PASSBACK ON ${targetBoat.id}!`;
+                            }
+                        }
+                    } else if (isDownwind && dTarget < 220) {
                         const r17Restricted = gameState.r17PairMatrix[`${this.id}_${targetBoat.id}`];
                         if (r17Restricted) {
-                            desiredCourse = getProperCourseHeading(this, effWindDir) || desiredCourse;
+                            directManeuverHeading = getProperCourseHeading(this, effWindDir);
                             this.roleBadge = `R17 PROPER COURSE VS ${targetBoat.id}`;
                         } else {
-                            const hookX = targetBoat.x - 20;
-                            const hookY = targetBoat.y + 14;
-                            desiredCourse = radToDeg(Math.atan2(hookX - this.x, -(hookY - this.y)));
-                            if (dTarget < 85) {
+                            if (this.tack === 'PORT' && this.aiTackCooldown <= 0) {
+                                this.triggerGybe();
+                            }
+                            const hookSlotX = targetBoat.x - 24;
+                            const hookSlotY = targetBoat.y + 8;
+                            const distToSlot = Math.hypot(hookSlotX - this.x, hookSlotY - this.y);
+
+                            if (distToSlot > 32 && this.y > targetBoat.y + 12) {
+                                directManeuverHeading = radToDeg(Math.atan2(hookSlotX - this.x, -(hookSlotY - this.y)));
                                 this.luffing = true;
-                                this.speedMatchCap = targetBoat.speed * 0.95;
-                                this.roleBadge = `DOWNWIND HOOK ${targetBoat.id}`;
+                                this.speedMatchCap = Math.max(1.8, targetBoat.speed * 0.72);
+                                this.roleBadge = `SETTING DOWNWIND HOOK ON ${targetBoat.id}`;
+                            } else {
+                                directManeuverHeading = wrapAngle180(effWindDir - 104);
+                                this.luffing = true;
+                                this.speedMatchCap = Math.max(2.0, targetBoat.speed * 0.95);
+                                this.roleBadge = `LUFFING ${targetBoat.id} OFF COURSE!`;
                             }
                         }
                     }
                 }
 
-                // --- JOB 3: PASS ---
+                // JOB 3: PASS
                 else if (job === 'PASS' && targetBoat) {
                     const dBattle = distBetween(this, targetBoat);
-                    const activeMark = this.getActiveRoundingMark();
-                    const distToMark = activeMark ? distBetween(this, activeMark) : 999;
 
-                    if (isUpwind && dBattle < 115) {
-                        const horizSep = Math.abs(this.x - targetBoat.x);
-                        if (horizSep < 36 && this.y > targetBoat.y + 8 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
-                            this.roleBadge = `PASSBACK: TACKING OUT!`;
+                    if (isUpwind && dBattle < 145) {
+                        const horizSep = this.x - targetBoat.x;
+                        const leewardDir = this.tack === 'STBD' ? -1 : 1;
+                        const isToLeeward = (horizSep * leewardDir) > 18;
+
+                        if (!isToLeeward && Math.abs(horizSep) < 42 && this.y > targetBoat.y && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                            this.roleBadge = `PASSBACK 1: TACKING OUT FREE!`;
                             this.triggerTack();
                         } else {
-                            const leewardSide = this.tack === 'STBD' ? -58 : 58;
-                            desiredCourse = radToDeg(Math.atan2((wp.x + leewardSide) - this.x, -(wp.y - this.y)));
-                            this.roleBadge = `PASSBACK: OUT FROM UNDER!`;
+                            const tackSign = this.tack === 'STBD' ? -1 : 1;
+                            directManeuverHeading = wrapAngle180(effWindDir + tackSign * 44);
+                            this.luffing = false;
+                            this.speedFloor = 5.2;
+                            this.roleBadge = `PASSBACK 2: OUT FROM UNDER!`;
                         }
-                    } else if (distToMark < THREE_BL_RADIUS * 1.8 && dBattle < 95) {
-                        desiredCourse = radToDeg(Math.atan2(wp.x - this.x, -(wp.y - this.y)));
-                        this.roleBadge = `DUCKING INTO MARK ROOM!`;
-                    } else {
-                        const escapeSide = (this.x >= targetBoat.x) ? 62 : -62;
-                        desiredCourse = radToDeg(Math.atan2((wp.x + escapeSide * 0.5) - this.x, -(wp.y - this.y)));
+                    } else if (distToMark < THREE_BL_RADIUS * 1.9 && dBattle < 140) {
+                        directManeuverHeading = radToDeg(Math.atan2(rawWp.x - this.x, -(rawWp.y - this.y)));
                         this.luffing = false;
+                        this.roleBadge = `SHOOTING INSIDE MARK TRAP!`;
+                    } else if (isDownwind && dBattle < 165) {
+                        directManeuverHeading = radToDeg(Math.atan2(rawWp.x - this.x, -(rawWp.y - this.y)));
+                        this.luffing = false;
+                        this.roleBadge = `RHUMB LINE PASS ON ${targetBoat.id}!`;
                     }
                 }
 
-                // --- JOB 4: ESCAPE ---
+                // JOB 4: ESCAPE
                 else if (job === 'ESCAPE' && targetBoat) {
                     const dAttacker = distBetween(this, targetBoat);
                     const trailingOpp = helperBoat;
                     const dTrailingOpp = trailingOpp ? distBetween(this, trailingOpp) : 999;
 
-                    if (trailingOpp && dAttacker < 130 && dTrailingOpp < 135 && targetBoat.luffing) {
-                        const blockX = trailingOpp.x + (this.tack === 'STBD' ? 16 : -16);
-                        const blockY = trailingOpp.y - 14;
-                        desiredCourse = radToDeg(Math.atan2(blockX - this.x, -(blockY - this.y)));
-                        this.speedMatchCap = Math.min(targetBoat.speed * 0.9, trailingOpp.speed * 0.95);
-                        this.roleBadge = `COUNTER-HOOKING ${trailingOpp.id}!`;
-                    } else if (isUpwind) {
-                        if (this.shadowFactor > 0.22 || this.leeBowedBy || dAttacker < 82) {
+                    if (trailingOpp && dAttacker < 140 && dTrailingOpp < 145 && (targetBoat.luffing || targetBoat.speed < this.speed * 0.88)) {
+                        const counterX = trailingOpp.x + (this.tack === 'STBD' ? 18 : -18);
+                        const counterY = trailingOpp.y - 12;
+                        directManeuverHeading = radToDeg(Math.atan2(counterX - this.x, -(counterY - this.y)));
+                        this.luffing = true;
+                        this.speedMatchCap = Math.min(targetBoat.speed * 0.9, trailingOpp.speed * 0.92);
+                        this.roleBadge = `DO UNTO OTHERS: HOOKING ${trailingOpp.id}!`;
+                    } else if (isUpwind && dAttacker < 110) {
+                        if (this.shadowFactor > 0.2 || this.leeBowedBy || dAttacker < 75) {
                             this.pinTimer += dt;
                         } else {
                             this.pinTimer = Math.max(0, this.pinTimer - dt * 0.5);
                         }
 
-                        if (this.pinTimer > 3.8 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                        if (this.escapeStage === 1) {
+                            const bearOffSign = this.tack === 'STBD' ? -1 : 1;
+                            directManeuverHeading = wrapAngle180(effWindDir + bearOffSign * 64);
+                            this.roleBadge = `ESCAPE 2.1: BEARING OFF TO DUCK ${targetBoat.id}!`;
+                            if (this.escapeStageTimer <= 0.25 && this.canSafelyTack()) {
+                                this.escapeStage = 0;
+                                this.pinTimer = 0;
+                                this.triggerTack();
+                                this.roleBadge = `ESCAPE 2.1: TACKING BEHIND ${targetBoat.id}!`;
+                            }
+                        } else if (this.pinTimer > 2.6) {
+                            this.escapeStage = 1;
+                            this.escapeStageTimer = 1.15;
                             this.pinTimer = 0;
-                            this.roleBadge = `BEAR-OFF & DUCK ESCAPE!`;
-                            this.triggerTack();
-                        } else if (this.y < targetBoat.y - 6 && dAttacker < 85) {
+                        } else if (this.y < targetBoat.y - 4 && dAttacker < 85) {
                             const pinchSign = this.tack === 'STBD' ? -1 : 1;
-                            desiredCourse = wrapAngle180(effWindDir + pinchSign * 36);
-                            this.roleBadge = `PINCHING OFF ${targetBoat.id}!`;
+                            directManeuverHeading = wrapAngle180(effWindDir + pinchSign * 35);
+                            this.roleBadge = `ESCAPE 1: PINCHING OFF ${targetBoat.id}!`;
                         }
-                    } else if (isDownwind && dAttacker < 95) {
-                        if (this.aiTackCooldown <= 0 && dAttacker < 65) {
+                    } else if (isDownwind && dAttacker < 105) {
+                        if (this.aiTackCooldown <= 0 && dAttacker < 75) {
                             this.roleBadge = `GYBING TO BREAK OVERLAP!`;
                             this.triggerGybe();
                         } else {
-                            const splitOffset = (targetBoat.x > this.x) ? -68 : 68;
-                            desiredCourse = radToDeg(Math.atan2((wp.x + splitOffset) - this.x, -(wp.y - this.y)));
+                            const splitOffset = (targetBoat.x > this.x) ? -75 : 75;
+                            directManeuverHeading = radToDeg(Math.atan2((wp.x + splitOffset) - this.x, -(wp.y - this.y)));
                         }
                     }
                 }
 
-                // --- JOB 5: CHASE ---
+                // JOB 5: CHASE
                 else if (job === 'CHASE' && targetBoat) {
                     const dTarget = distBetween(this, targetBoat);
                     if (this.leg === 2 || this.leg === 3 || this.leg === 4) {
-                        if (mode === 'HIGH_LOW_HIGH') {
-                            desiredCourse = radToDeg(Math.atan2((targetBoat.x - 28) - this.x, -(targetBoat.y - 22 - this.y)));
-                            this.roleBadge = dTarget < 110 ? `OVER-THE-TOP ON ${targetBoat.id}!` : this.roleBadge;
-                        } else if (mode === 'HIGH_LOW_LOW') {
-                            desiredCourse = radToDeg(Math.atan2((wp.x + 26) - this.x, -(wp.y - this.y)));
+                        if (mode === 'HIGH_LOW_HIGH' && dTarget < 165) {
+                            const highX = targetBoat.x - (this.leg === 3 ? 28 : 0);
+                            const highY = targetBoat.y - (this.leg === 3 ? 0 : 28);
+                            directManeuverHeading = radToDeg(Math.atan2(highX - this.x, -(highY - this.y)));
+                            this.roleBadge = `HIGH-LOW (HIGH) ON ${targetBoat.id}!`;
+                        } else if (mode === 'HIGH_LOW_LOW' && dTarget < 165) {
+                            directManeuverHeading = radToDeg(Math.atan2(rawWp.x - this.x, -(rawWp.y - this.y)));
+                            this.roleBadge = `HIGH-LOW (LOW) INSIDE ${targetBoat.id}!`;
                         }
-                    } else if (isUpwind && this.shadowFactor > 0.3 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
-                        this.triggerTack();
+                    } else if (isUpwind) {
+                        if (this.shadowFactor > 0.24 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                            this.roleBadge = `TACKING TO CLEAR AIR!`;
+                            this.triggerTack();
+                        }
                     }
                 }
 
-                // Steer according to leg type
-                if (isUpwind) {
+                if (directManeuverHeading !== null) {
+                    this.steerDirectly(directManeuverHeading, dt, 78);
+                } else if (isUpwind) {
                     this.steerWithLaylines(desiredCourse, effWindDir, dt, this.leg === 5);
                 } else if (isDownwind) {
                     this.steerDownwindRun(desiredCourse, effWindDir, dt);
@@ -1692,7 +1854,7 @@
                     this.steerDirectly(desiredCourse, dt, 74);
                 }
 
-                this.applyRightOfWayAvoidance(effWindDir, dt);
+                this.applyRightOfWayAvoidance(effWindDir, dt, directManeuverHeading !== null);
             }
 
             steerWithLaylines(desiredCourse, effWindDir, dt, isFinishLeg) {
@@ -1775,24 +1937,22 @@
                 for (const other of gameState.boats) {
                     if (!other.activeInRace || other === this || other.finished) continue;
                     const d = distBetween(this, other);
-                    if (d < BOAT_LENGTH * 1.55) return false;
-                    // Rule 18.2(b) / 18.3 / D1.1(b)(3): Avoid tacking inside the zone when an opponent is close
-                    if (this.inZone && other.team !== this.team && d < BOAT_LENGTH * 2.3) {
+                    if (d < BOAT_LENGTH * 1.45) return false;
+                    if (this.inZone && other.team !== this.team && d < BOAT_LENGTH * 2.2) {
                         return false;
                     }
                 }
                 return true;
             }
 
-            applyRightOfWayAvoidance(effWindDir, dt) {
+            applyRightOfWayAvoidance(effWindDir, dt, inActiveManeuver = false) {
                 for (const other of gameState.boats) {
                     if (!other.activeInRace || other === this || other.finished) continue;
                     const d = distBetween(this, other);
-                    if (d > BOAT_LENGTH * 2.4) continue;
+                    if (d > BOAT_LENGTH * 2.2) continue;
 
-                    // Teammate Switch-Tacking (No Ducking Teammates!)
                     if (other.team === this.team && this.tack !== other.tack && (this.leg === 1 || this.leg === 5)) {
-                        if (this.aiTackCooldown <= 0 && d < BOAT_LENGTH * 1.9) {
+                        if (this.aiTackCooldown <= 0 && d < BOAT_LENGTH * 1.85) {
                             this.roleBadge = `SWITCH TACK W/ ${other.id}`;
                             this.triggerTack();
                             if (!other.isPlayer && other.aiTackCooldown <= 0) other.triggerTack();
@@ -1800,10 +1960,9 @@
                         }
                     }
 
-                    // Rule 18: If required to give mark-room to `other`, give wide room around the mark!
                     if (this.inZone && other.inZone && this.leg === other.leg) {
                         const pairRel = getRule18PairStatus(this, other);
-                        if (pairRel && pairRel.giveRoomId === this.id) {
+                        if (pairRel && pairRel.giveRoomId === this.id && d < BOAT_LENGTH * 1.35) {
                             const activeMark = this.getActiveRoundingMark();
                             if (activeMark) {
                                 const awayFromMark = radToDeg(Math.atan2(this.x - activeMark.x, -(this.y - activeMark.y)));
@@ -1815,22 +1974,21 @@
                         }
                     }
 
-                    // Rule 10: Port keeps clear of Starboard
                     if (this.tack === 'PORT' && other.tack === 'STBD' && !other.spinning && !(other.ocs && other.y < COURSE.startPin.y)) {
                         const bearingToOther = radToDeg(Math.atan2(other.x - this.x, -(other.y - this.y)));
-                        if (Math.abs(angleDiff(bearingToOther, this.heading)) < 55) {
+                        if (Math.abs(angleDiff(bearingToOther, this.heading)) < 52 && d < BOAT_LENGTH * 1.9) {
                             this.roleBadge = `DUCKING ${other.id} (R10)`;
                             this.heading = wrapAngle180(this.heading + 85 * dt);
                             return;
                         }
                     }
 
-                    // Rule 11: Windward keeps clear of Leeward on same tack
-                    if (this.tack === other.tack && d < BOAT_LENGTH * 1.45) {
+                    const wLThreshold = inActiveManeuver ? BOAT_LENGTH * 0.88 : BOAT_LENGTH * 1.25;
+                    if (this.tack === other.tack && d < wLThreshold) {
                         const wl = getWindwardLeewardRelation(this, other, effWindDir);
                         if (wl.windward === this) {
                             const sign = this.tack === 'STBD' ? -1 : 1;
-                            this.heading = wrapAngle180(this.heading - sign * 58 * dt);
+                            this.heading = wrapAngle180(this.heading - sign * 62 * dt);
                         }
                     }
                 }
@@ -1917,8 +2075,6 @@
                     }
                 } else if (this.leg === 5) {
                     const finY = COURSE.finishPin.y;
-                    // RRS Definition Finish & Rule 44.2: When taking a penalty at or near the finishing line,
-                    // her hull shall be completely on the course side of the line before she finishes.
                     if (this.prevY >= finY && this.y < finY &&
                         this.x >= COURSE.finishPin.x - 22 && this.x <= COURSE.finishRC.x + 22) {
                         if (this.penalties > 0 || this.spinning) {
@@ -1956,7 +2112,6 @@
             return gameState.r18PairMatrix[k] || null;
         }
 
-        // Called whenever a boat passes head-to-wind (Rule 18.2(b), Rule 18.3, and Team Racing Rule D1.1(b)(3))
         function onBoatPassedHeadToWind(tackingBoat) {
             const activeMark = tackingBoat.getActiveRoundingMark();
             if (!activeMark) return;
@@ -1966,7 +2121,6 @@
                 const k = getPairKey(tackingBoat.id, other.id, tackingBoat.leg);
                 const existing = gameState.r18PairMatrix[k];
 
-                // Rule 18.2(b): Rule 18.2(a) no longer applies if the boat entitled to mark-room passes head to wind!
                 if (existing && existing.entitledId === tackingBoat.id) {
                     delete gameState.r18PairMatrix[k];
                     if (tackingBoat.inZone) {
@@ -1974,9 +2128,6 @@
                     }
                 }
 
-                // Rule 18.3 (Tacking in the Zone at a Port-rounding mark, e.g. Mark 3 or Mark 4):
-                // If a boat passes head to wind from port to starboard tack in the zone of a mark to be left to port,
-                // rule 18.2 does not apply between her and another boat on starboard tack that is fetching the mark.
                 if (tackingBoat.inZone && activeMark.rounding === 'PORT' && other.tack === 'STBD') {
                     const localWind = getWindAt(other.x, other.y);
                     if (isBoatFetchingMark(other, activeMark, localWind.dir)) {
@@ -1992,8 +2143,6 @@
                     }
                 }
 
-                // Team Racing Rule D1.1(b)(3):
-                // "If a boat passes head to wind and at that moment is clear astern of a boat in the zone, she shall give the clear-ahead boat mark-room."
                 if (other.inZone) {
                     const rel = getHullRelation(tackingBoat, other);
                     if (rel.aClearAsternOfB) {
@@ -2014,7 +2163,6 @@
         function updateZonesAndOverlaps() {
             const activeBoats = gameState.boats.filter(b => b.activeInRace && !b.finished);
 
-            // 1. Update 2-Boat-Length Zone status per boat (RRS Definition Zone + Appendix D1.1(a))
             for (const b of activeBoats) {
                 const activeMark = b.getActiveRoundingMark();
                 if (!activeMark) {
@@ -2025,10 +2173,8 @@
                 }
                 const dMark = distBetween(b, activeMark);
                 const wasInZone = b.inZone;
-                // A boat is in the zone when any part of her hull is within 2 hull lengths of the mark
                 b.inZone = dMark <= THREE_BL_RADIUS;
 
-                // Rule 18.2(b): If a boat entitled to mark-room leaves the zone, Rule 18.2(a) ceases to apply
                 if (wasInZone && !b.inZone) {
                     b.r18Right = null;
                     b.tackedInZone = false;
@@ -2036,7 +2182,6 @@
                 }
             }
 
-            // 2. Update pairwise Rule 18 zone-entry locks and Rule 17 (Proper Course) leeward-overlap locks
             for (let i = 0; i < activeBoats.length; i++) {
                 for (let j = i + 1; j < activeBoats.length; j++) {
                     const a = activeBoats[i];
@@ -2044,7 +2189,6 @@
                     const rel = getHullRelation(a, b);
                     const d = distBetween(a, b);
 
-                    // --- Rule 17 Tracking: Same tack overlap established from clear astern within 2 hull lengths ---
                     const kAB = `${a.id}_${b.id}`;
                     const kBA = `${b.id}_${a.id}`;
                     const wasOverlapped = !!(gameState.r17PairMatrix[`OV_${kAB}`]);
@@ -2053,15 +2197,14 @@
                         if (!wasOverlapped && gameState.phase === 'RACING') {
                             const localWind = getWindAt(a.x, a.y);
                             const wl = getWindwardLeewardRelation(a, b, localWind.dir);
-                            // Check if the leeward boat was clear astern just prior to overlapping
                             const prevPosA = { x: a.prevX, y: a.prevY, heading: a.prevHeading };
                             const prevPosB = { x: b.prevX, y: b.prevY, heading: b.prevHeading };
                             const prevRel = getHullRelation(prevPosA, prevPosB);
                             if (wl.leeward === a && prevRel.aClearAsternOfB) {
-                                gameState.r17PairMatrix[kAB] = true; // `a` is subject to Rule 17 (shall not sail above proper course)
-                                a.justAcquiredRowTimer = 1.25;       // Rule 15 also applies initially when establishing leeward overlap from astern
+                                gameState.r17PairMatrix[kAB] = true;
+                                a.justAcquiredRowTimer = 1.25;
                             } else if (wl.leeward === b && prevRel.bClearAsternOfA) {
-                                gameState.r17PairMatrix[kBA] = true; // `b` is subject to Rule 17
+                                gameState.r17PairMatrix[kBA] = true;
                                 b.justAcquiredRowTimer = 1.25;
                             }
                         }
@@ -2072,7 +2215,6 @@
                         delete gameState.r17PairMatrix[kBA];
                     }
 
-                    // --- Rule 18 Pairwise Mark-Room Lock ---
                     const activeMark = a.getActiveRoundingMark();
                     const k18 = getPairKey(a.id, b.id, a.leg);
                     if (!doesRule18ApplyBetween(a, b, activeMark)) {
@@ -2088,8 +2230,6 @@
                         let ruleRef = 'Rule 18.2(a)';
 
                         if (rel.overlapped) {
-                            // Rule 18.2(a)(1): Overlapped when first reaches zone -> outside boat gives inside boat mark-room
-                            // Inside boat is the one closer to the mark (or on the mark side of the other boat)
                             if (dA <= dB) {
                                 entitled = a;
                                 giveRoom = b;
@@ -2099,7 +2239,6 @@
                             }
                             ruleRef = 'Rule 18.2(a)(1) (Inside Overlap)';
                         } else {
-                            // Rule 18.2(a)(2): Not overlapped when first reaches zone -> boat clear astern gives mark-room
                             if (dA <= dB) {
                                 entitled = a;
                                 giveRoom = b;
@@ -2131,7 +2270,6 @@
             }
         }
 
-        // Compute Wind Shadows (Dirty Air Cones) & Lee-Bow Plumes
         function computeWindShadowsAndLeeBows() {
             for (const b of gameState.boats) {
                 b.shadowFactor = 0;
@@ -2177,16 +2315,13 @@
         }
 
         // ============================================================================
-        // RRS 2025-2028 PART 2, RULE 31, RULE 43 (EXONERATION) & APPENDIX D ADJUDICATOR
-        // Automatically determines right-of-way, limitations, mark-room, mark-touch,
-        // and exonerations upon incident without altering how penalties are assigned.
+        // RRS 2025-2028 PART 2, RULE 31, RULE 43 & APPENDIX D ADJUDICATOR
         // ============================================================================
         function adjudicateBoatToBoatIncident(a, b) {
             const localWind = getWindAt((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
             const windDir = localWind.dir;
             const rel = getHullRelation(a, b);
 
-            // 1. Determine base Right-of-Way (ROW) and Keep-Clear boat under Section D (Rule 21) & Section A (Rules 10, 11, 12, 13)
             let rowBoat = null;
             let keepClearBoat = null;
             let baseRule = '';
@@ -2194,19 +2329,15 @@
             const aReturningToStart = (gameState.phase === 'RACING' && a.leg === 0 && (a.ocs || a.y < COURSE.startPin.y));
             const bReturningToStart = (gameState.phase === 'RACING' && b.leg === 0 && (b.ocs || b.y < COURSE.startPin.y));
 
-            // Section D Preamble: When Rule 21 applies between two boats, Section A rules do not!
             if (a.spinning !== b.spinning) {
-                // Rule 21.2: A boat taking a penalty shall keep clear of one that is not
                 keepClearBoat = a.spinning ? a : b;
                 rowBoat = a.spinning ? b : a;
                 baseRule = 'Rule 21.2 (Taking a Penalty)';
             } else if (aReturningToStart !== bReturningToStart) {
-                // Rule 21.1: A boat sailing towards the pre-start side of the starting line after her starting signal to start/comply shall keep clear
                 keepClearBoat = aReturningToStart ? a : b;
                 rowBoat = aReturningToStart ? b : a;
                 baseRule = 'Rule 21.1 (Returning to Start)';
             } else if (a.isTacking || b.isTacking) {
-                // Rule 13 (While Tacking): After a boat passes head to wind, she shall keep clear until on a close-hauled course.
                 if (a.isTacking && !b.isTacking) {
                     keepClearBoat = a;
                     rowBoat = b;
@@ -2214,51 +2345,37 @@
                     keepClearBoat = b;
                     rowBoat = a;
                 } else {
-                    // Both tacking simultaneously: the one on the other's port side or the one astern shall keep clear
                     const bearingBFromA = wrapAngle180(radToDeg(Math.atan2(b.x - a.x, -(b.y - a.y))) - a.heading);
                     keepClearBoat = bearingBFromA > 0 ? a : b;
                     rowBoat = keepClearBoat === a ? b : a;
                 }
                 baseRule = 'Rule 13 (While Tacking)';
             } else if (a.tack !== b.tack) {
-                // Rule 10 (On Opposite Tacks): Port-tack boat shall keep clear of a starboard-tack boat
                 keepClearBoat = a.tack === 'PORT' ? a : b;
                 rowBoat = a.tack === 'STBD' ? a : b;
                 baseRule = 'Rule 10 (Port/Starboard)';
             } else if (rel.overlapped) {
-                // Rule 11 (On the Same Tack, Overlapped): Windward boat shall keep clear of a leeward boat
                 const wl = getWindwardLeewardRelation(a, b, windDir);
                 keepClearBoat = wl.windward;
                 rowBoat = wl.leeward;
                 baseRule = 'Rule 11 (Windward/Leeward)';
             } else {
-                // Rule 12 (On the Same Tack, Not Overlapped): Boat clear astern shall keep clear of a boat clear ahead
                 keepClearBoat = rel.aClearAsternOfB ? a : b;
                 rowBoat = keepClearBoat === a ? b : a;
                 baseRule = 'Rule 12 (Clear Astern/Clear Ahead)';
             }
 
-            // 2. Check Section B General Limitations on the Right-of-Way Boat (Rules 15, 16.1, 16.2, 17)
             let sectionBBreachByRow = null;
             if (rowBoat && keepClearBoat) {
-                // Rule 15 (Acquiring Right of Way): Must initially give the other boat room to keep clear
                 if (rowBoat.justAcquiredRowTimer > 0.35) {
                     sectionBBreachByRow = 'Rule 15 (Acquiring Right of Way — No Room Given)';
-                }
-                // Rule 16.2: On a beat to windward when a port-tack boat is keeping clear by sailing to pass to leeward of a starboard-tack boat,
-                // the starboard-tack boat shall not bear away if as a result the port-tack boat must change course immediately
-                else if (baseRule.startsWith('Rule 10') && (rowBoat.leg === 1 || rowBoat.leg === 5)) {
-                    // On Starboard tack, bearing away increases heading clockwise (positive angularVelocity)
+                } else if (baseRule.startsWith('Rule 10') && (rowBoat.leg === 1 || rowBoat.leg === 5)) {
                     if (rowBoat.angularVelocity > 38 && keepClearBoat.twa > 52) {
                         sectionBBreachByRow = 'Rule 16.2 (Bearing Away on Ducking Port Boat)';
                     }
-                }
-                // Rule 16.1 (Changing Course): When a right-of-way boat changes course rapidly, she shall give the other boat room to keep clear
-                else if (Math.abs(rowBoat.angularVelocity) > 88 && Math.abs(keepClearBoat.angularVelocity) > 35) {
+                } else if (Math.abs(rowBoat.angularVelocity) > 88 && Math.abs(keepClearBoat.angularVelocity) > 35) {
                     sectionBBreachByRow = 'Rule 16.1 (Changing Course Without Giving Room)';
-                }
-                // Rule 17 (On the Same Tack; Proper Course): Leeward boat that became overlapped from clear astern within 2 BL shall not sail above her proper course
-                else if (baseRule.startsWith('Rule 11') && gameState.phase === 'RACING' && gameState.r17PairMatrix[`${rowBoat.id}_${keepClearBoat.id}`]) {
+                } else if (baseRule.startsWith('Rule 11') && gameState.phase === 'RACING' && gameState.r17PairMatrix[`${rowBoat.id}_${keepClearBoat.id}`]) {
                     const properHdg = getProperCourseHeading(rowBoat, windDir);
                     if (properHdg !== null) {
                         const properTwa = Math.abs(angleDiff(properHdg, windDir));
@@ -2269,16 +2386,11 @@
                 }
             }
 
-            // 3. Check Section C (Rule 18 Mark-Room & Rule 18.3 / Appendix D1.1b) and Rule 43.1(b) Exoneration!
             const r18Status = getRule18PairStatus(a, b);
             if (r18Status) {
                 const entitledBoat = r18Status.entitledId === a.id ? a : b;
                 const giveRoomBoat = r18Status.giveRoomId === a.id ? a : b;
 
-                // Rule 43.1(b) EXONERATION:
-                // "When a boat is sailing within the room or mark-room to which she is entitled and, as a consequence of an incident
-                // with a boat required to give her that room or mark-room, she breaks a rule of Section A of Part 2, rule 15, 16, or 31,
-                // she is exonerated for her breach."
                 if (keepClearBoat === entitledBoat) {
                     return {
                         fouledBoat: giveRoomBoat,
@@ -2295,8 +2407,6 @@
                 };
             }
 
-            // 4. If the Right-of-Way boat broke a Section B limitation (Rule 15, 16.1, 16.2, or 17),
-            // the Keep-Clear boat is exonerated under Rule 43.1(a) / 43.1(b) and the ROW boat is penalized!
             if (sectionBBreachByRow) {
                 return {
                     fouledBoat: rowBoat,
@@ -2306,9 +2416,6 @@
                 };
             }
 
-            // 5. Rule 43.1(a) Compelled Foul Check:
-            // If `keepClearBoat` was just fouled/pushed by a third boat `lastCompelledBy` within the last 1.5s,
-            // `keepClearBoat` is exonerated under Rule 43.1(a)!
             if (keepClearBoat && keepClearBoat.lastCompelledBy && keepClearBoat.lastCompelledBy !== rowBoat.id && keepClearBoat.lastCompelledTimer > 0) {
                 return {
                     fouledBoat: null,
@@ -2318,7 +2425,6 @@
                 };
             }
 
-            // 6. Standard Section A / Section D breach by `keepClearBoat` (Rule 43.1(c) exonerates `rowBoat` for Rule 14 contact)
             return {
                 fouledBoat: keepClearBoat,
                 exoneratedBoat: rowBoat,
@@ -2327,36 +2433,155 @@
             };
         }
 
+        // ============================================================================
+        // REALISTIC RIGID-BODY OBB (ORIENTED BOUNDING BOX) HULL COLLISIONS & TORQUE
+        // ============================================================================
+        function getBoatHullAxesAndExtents(boat) {
+            const rad = degToRad(boat.heading);
+            const fwdX = Math.sin(rad);
+            const fwdY = -Math.cos(rad);
+            const rightX = Math.cos(rad);
+            const rightY = Math.sin(rad);
+            return {
+                x: boat.x,
+                y: boat.y,
+                fwdX,
+                fwdY,
+                rightX,
+                rightY,
+                halfL: BOAT_LENGTH * 0.48,
+                halfW: BOAT_BEAM * 0.48
+            };
+        }
+
+        function checkOBBHullCollision(a, b) {
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            if (dx * dx + dy * dy > (BOAT_LENGTH * 1.15) ** 2) return null;
+
+            const obbA = getBoatHullAxesAndExtents(a);
+            const obbB = getBoatHullAxesAndExtents(b);
+
+            const axes = [
+                { x: obbA.fwdX, y: obbA.fwdY },
+                { x: obbA.rightX, y: obbA.rightY },
+                { x: obbB.fwdX, y: obbB.fwdY },
+                { x: obbB.rightX, y: obbB.rightY }
+            ];
+
+            let minOverlap = Infinity;
+            let bestAxis = null;
+
+            for (const axis of axes) {
+                const projA = obbA.halfL * Math.abs(axis.x * obbA.fwdX + axis.y * obbA.fwdY) +
+                              obbA.halfW * Math.abs(axis.x * obbA.rightX + axis.y * obbA.rightY);
+                const projB = obbB.halfL * Math.abs(axis.x * obbB.fwdX + axis.y * obbB.fwdY) +
+                              obbB.halfW * Math.abs(axis.x * obbB.rightX + axis.y * obbB.rightY);
+                const centerDist = Math.abs(dx * axis.x + dy * axis.y);
+                const overlap = (projA + projB) - centerDist;
+                if (overlap <= 0) {
+                    return null;
+                }
+                if (overlap < minOverlap) {
+                    minOverlap = overlap;
+                    const sign = (dx * axis.x + dy * axis.y) >= 0 ? 1 : -1;
+                    bestAxis = { x: axis.x * sign, y: axis.y * sign };
+                }
+            }
+
+            const contactX = (a.x + b.x) * 0.5;
+            const contactY = (a.y + b.y) * 0.5;
+
+            return {
+                penetration: minOverlap,
+                nx: bestAxis.x,
+                ny: bestAxis.y,
+                contactX,
+                contactY
+            };
+        }
+
+        function resolveRealisticHullCollision(a, b, manifold) {
+            const { penetration, nx, ny, contactX, contactY } = manifold;
+
+            const sep = penetration * 0.58 + 0.8;
+            a.x -= nx * sep;
+            a.y -= ny * sep;
+            b.x += nx * sep;
+            b.y += ny * sep;
+
+            const pxPerKnot = 14.2;
+            const radA = degToRad(a.heading);
+            const radB = degToRad(b.heading);
+            const vAx = Math.sin(radA) * a.speed * pxPerKnot + a.knockvx;
+            const vAy = -Math.cos(radA) * a.speed * pxPerKnot + a.knockvy;
+            const vBx = Math.sin(radB) * b.speed * pxPerKnot + b.knockvx;
+            const vBy = -Math.cos(radB) * b.speed * pxPerKnot + b.knockvy;
+
+            const relVx = vBx - vAx;
+            const relVy = vBy - vAy;
+            const velAlongNormal = relVx * nx + relVy * ny;
+
+            const restitution = 0.42;
+            const impulseMag = Math.max(22, -(1 + restitution) * velAlongNormal * 0.55);
+
+            a.knockvx -= nx * impulseMag;
+            a.knockvy -= ny * impulseMag;
+            b.knockvx += nx * impulseMag;
+            b.knockvy += ny * impulseMag;
+
+            const alignmentA = Math.abs(Math.sin(radA) * nx - Math.cos(radA) * ny);
+            const alignmentB = Math.abs(Math.sin(radB) * nx - Math.cos(radB) * ny);
+            a.speed *= (1 - 0.24 * alignmentA - 0.08);
+            b.speed *= (1 - 0.24 * alignmentB - 0.08);
+
+            const rAx = contactX - a.x;
+            const rAy = contactY - a.y;
+            const rBx = contactX - b.x;
+            const rBy = contactY - b.y;
+
+            const torqueA = (rAx * (-ny) - rAy * (-nx)) * 2.35;
+            const torqueB = (rBx * ny - rBy * nx) * 2.35;
+
+            a.angularImpulse = Math.max(-135, Math.min(135, a.angularImpulse + torqueA));
+            b.angularImpulse = Math.max(-135, Math.min(135, b.angularImpulse + torqueB));
+
+            gameState.collisionSparks.push({
+                x: contactX,
+                y: contactY,
+                radius: 4,
+                maxRadius: 24,
+                alpha: 0.9
+            });
+        }
+
         function enforceRulesAndCollisions() {
             updateZonesAndOverlaps();
 
             const marks = [COURSE.startPin, COURSE.startRC, COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4, COURSE.finishPin, COURSE.finishRC];
 
-            // --- STEP 1: Boat-to-Boat Meetings & Incidents (Part 2 + Rule 43 Exonerations) ---
             for (let i = 0; i < gameState.boats.length; i++) {
                 for (let j = i + 1; j < gameState.boats.length; j++) {
                     const a = gameState.boats[i];
                     const b = gameState.boats[j];
                     if (!a.activeInRace || !b.activeInRace || a.finished || b.finished) continue;
 
-                    const d = distBetween(a, b);
-                    const minBoatSep = 30;
-                    if (d < minBoatSep && d > 0.01) {
-                        const nx = (b.x - a.x) / d;
-                        const ny = (b.y - a.y) / d;
-                        const overlap = (minBoatSep - d) * 0.55;
-                        a.x -= nx * overlap;
-                        a.y -= ny * overlap;
-                        b.x += nx * overlap;
-                        b.y += ny * overlap;
+                    const manifold = checkOBBHullCollision(a, b);
+                    if (manifold) {
+                        resolveRealisticHullCollision(a, b, manifold);
 
                         if (a.foulCooldown <= 0 && b.foulCooldown <= 0) {
+                            if (a.team === b.team) {
+                                a.foulCooldown = 2.0;
+                                b.foulCooldown = 2.0;
+                                continue;
+                            }
+
                             const decision = adjudicateBoatToBoatIncident(a, b);
 
                             if (decision.exoneratedBoat && decision.fouledBoat) {
-                                // Record that `exoneratedBoat` was compelled by `fouledBoat` in case it gets pushed into a mark (Rule 31) or another boat (Rule 43.1a/b)
                                 decision.exoneratedBoat.lastCompelledBy = decision.fouledBoat.id;
-                                decision.exoneratedBoat.lastCompelledTimer = 2.0;
+                                decision.exoneratedBoat.lastCompelledTimer = 2.2;
                             }
 
                             if (decision.fouledBoat) {
@@ -2378,27 +2603,34 @@
                 }
             }
 
-            // --- STEP 2: Rule 31 (Touching a Mark) & Rule 43.1(a)/(b) + Rule 44.1(a) Exonerations ---
             for (const b of gameState.boats) {
                 if (!b.activeInRace) continue;
 
                 for (const m of marks) {
                     const d = distBetween(b, m);
-                    const minSep = MARK_RADIUS + 14;
-                    if (d < minSep) {
-                        const pushAngle = Math.atan2(b.x - m.x, -(b.y - m.y));
-                        b.x = m.x + Math.sin(pushAngle) * (minSep + 3);
-                        b.y = m.y - Math.cos(pushAngle) * (minSep + 3);
+                    const minSep = (m.isRC ? 24 : MARK_RADIUS) + 12;
+                    if (d < minSep && d > 0.01) {
+                        const nx = (b.x - m.x) / d;
+                        const ny = (b.y - m.y) / d;
+                        b.x = m.x + nx * (minSep + 2);
+                        b.y = m.y + ny * (minSep + 2);
+                        b.knockvx += nx * 36;
+                        b.knockvy += ny * 36;
+                        b.speed *= 0.72;
 
-                        // RRS Rule 31: Only applies if the mark begins, bounds, or ends the leg the boat is currently sailing
-                        // (or is a starting mark before starting, or a finishing mark after finishing)
+                        gameState.collisionSparks.push({
+                            x: m.x + nx * MARK_RADIUS,
+                            y: m.y + ny * MARK_RADIUS,
+                            radius: 3,
+                            maxRadius: 18,
+                            alpha: 0.85
+                        });
+
                         if (!isMarkActiveForBoatUnderRule31(b, m)) {
                             continue;
                         }
 
                         if (b.foulCooldown <= 0) {
-                            // Check Rule 43.1(a) & 43.1(b) Exoneration for touching a mark:
-                            // Was `b` compelled to touch the mark by another boat that broke a rule, or crowded while entitled to mark-room?
                             let exoneratedBy = b.lastCompelledBy;
                             if (!exoneratedBy && b.inZone) {
                                 for (const other of gameState.boats) {
@@ -2407,7 +2639,6 @@
                                         const r18 = getRule18PairStatus(b, other);
                                         if (r18 && r18.entitledId === b.id) {
                                             exoneratedBy = other.id;
-                                            // Penalize the boat that failed to give mark-room if not already penalized in this incident
                                             if (other.foulCooldown <= 0) {
                                                 other.penalties++;
                                                 other.foulCooldown = 3.8;
@@ -2506,6 +2737,13 @@
 
             enforceRulesAndCollisions();
 
+            for (let i = gameState.collisionSparks.length - 1; i >= 0; i--) {
+                const s = gameState.collisionSparks[i];
+                s.radius += 48 * dt;
+                s.alpha -= 1.8 * dt;
+                if (s.alpha <= 0) gameState.collisionSparks.splice(i, 1);
+            }
+
             const activeBoats = gameState.boats.filter(b => b.activeInRace);
             const finishedCount = activeBoats.filter(b => b.finished).length;
             if (gameState.phase === 'RACING' && activeBoats.length > 0 && finishedCount >= activeBoats.length) {
@@ -2518,7 +2756,6 @@
                 window.syncLocalBoatToParty();
             }
 
-            // Camera Tracking
             const player = gameState.boats.find(b => b.isPlayer && b.activeInRace) || gameState.boats[0];
             if (config.cameraFollow && player) {
                 gameState.camera.x += (player.x - gameState.camera.x) * Math.min(1, dt * 6);
@@ -2560,6 +2797,16 @@
             for (const b of gameState.boats) {
                 if (!b.activeInRace) continue;
                 renderC420Boat(b, rankMap.get(b.id) || 1);
+            }
+
+            for (const s of gameState.collisionSparks) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(251, 191, 36, ${Math.max(0, s.alpha)})`;
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+                ctx.restore();
             }
 
             ctx.restore();
@@ -2905,7 +3152,6 @@
                 windEl.textContent = `TWD ${twd}° • ${gameState.baseWindSpeed.toFixed(1)} kt`;
             }
 
-            // Team Combination Scoreboard & Play Callouts
             const blueRanks = gameState.boats.filter(b => b.activeInRace && b.team === 'BLUE').map(b => rankMap.get(b.id) || 6).sort((a, b) => a - b);
             const redRanks = gameState.boats.filter(b => b.activeInRace && b.team === 'RED').map(b => rankMap.get(b.id) || 6).sort((a, b) => a - b);
             const blueSum = blueRanks.reduce((a, b) => a + b, 0);
@@ -2938,7 +3184,6 @@
                 playCall.textContent = gameState.playbookState.comboTitle || '3v3 RACE';
             }
 
-            // Update Left-hand 3v3 Playbook Jobs Matrix
             const matrixEl = document.getElementById('liveJobsMatrix');
             if (matrixEl) {
                 const jobsMap = gameState.playbookState.jobsByBoatId || {};
@@ -2953,7 +3198,6 @@
                 }).join('');
             }
 
-            // Bottom Player Telemetry
             if (player) {
                 const helmEl = document.getElementById('hudHelmId');
                 const spdEl = document.getElementById('hudSpeed');
@@ -3024,6 +3268,7 @@
             gameState.timer = config.startLengthSec;
             gameState.finishOrder = [];
             gameState.radioLogs = [];
+            gameState.collisionSparks = [];
             gameState.r18PairMatrix = {};
             gameState.r17PairMatrix = {};
             gameState.playbookState.lastCalloutKey = '';
@@ -3076,7 +3321,6 @@
             const summary = document.getElementById('finishComboSummary');
             const table = document.getElementById('finishOrderTable');
 
-            // Apply RRS Appendix D3.1 Scoring (including +10 pts for un-cleared OCS if any)
             const bluePlaces = [];
             const redPlaces = [];
             sortedBoats.forEach((b, i) => {
@@ -3087,7 +3331,6 @@
 
             const blueScore = bluePlaces.reduce((a, b) => a + b, 0);
             const redScore = redPlaces.reduce((a, b) => a + b, 0);
-            // RRS D3.4: Team with lower total points wins; if equal, team that does NOT have 1st place wins
             const firstPlaceTeam = sortedBoats[0]?.team || 'BLUE';
             const blueWon = blueScore < redScore || (blueScore === redScore && firstPlaceTeam !== 'BLUE');
 
@@ -3142,7 +3385,6 @@
             if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.luff = false;
         });
 
-        // Scroll Wheel & Trackpad Pinch/Scroll Zoom
         window.addEventListener('wheel', (e) => {
             if (!document.getElementById('startModal').classList.contains('hidden')) return;
             e.preventDefault();
@@ -3150,7 +3392,6 @@
             setZoom(config.userZoom + delta);
         }, { passive: false });
 
-        // Holdable On-Screen Buttons
         function bindHoldButton(btnId, keyProp) {
             const btn = document.getElementById(btnId);
             if (!btn) return;
@@ -3240,7 +3481,7 @@
         requestAnimationFrame(mainLoop);
     </script>
 
-    <!-- REAL CROSS-DEVICE MULTIPLAYER PARTY ENGINE (MULTI-BROKER MQTT WSS + PEERJS WEBRTC + BROADCAST FALLBACK) -->
+    <!-- REAL CROSS-DEVICE MULTIPLAYER PARTY ENGINE -->
     <script>
         (function initMultiplayerEngine() {
             const BOAT_SLOTS = ['B1', 'B2', 'B3', 'R1', 'R2', 'R3'];
@@ -4120,7 +4361,6 @@
                 sendRoomPacket(payload, false);
             };
 
-            // Bind Party Lobby UI Events
             document.getElementById('createPublicPartyBtn').addEventListener('click', () => createParty(true));
             document.getElementById('createPrivatePartyBtn').addEventListener('click', () => createParty(false));
             document.getElementById('joinByCodeBtn').addEventListener('click', () => {
