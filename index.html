@@ -1,0 +1,2050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C420 Team Racing Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #061826;
+            color: #f8fafc;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            cursor: crosshair;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.88);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.55);
+        }
+
+        .btn-game {
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+        }
+
+        .btn-game:active, .btn-game.active-press {
+            transform: translateY(2px);
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+        }
+
+        .key-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.45rem;
+            height: 1.35rem;
+            padding: 0 0.35rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            font-weight: 800;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            border-bottom-width: 2px;
+            border-radius: 0.35rem;
+            color: #38bdf8;
+        }
+    </style>
+</head>
+<body class="relative select-none">
+
+    <!-- MAIN 2D TOP-DOWN SAILING CANVAS -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- FLOATING TOAST / UMPIRE CALL BANNER -->
+    <div id="toastAlert" class="fixed top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none opacity-0 transition-opacity duration-300">
+        <div class="glass-panel px-4 py-2 rounded-full border border-amber-400/50 text-xs sm:text-sm font-bold text-amber-200 flex items-center gap-2 shadow-lg">
+            <i class="fa-solid fa-flag text-amber-400"></i>
+            <span id="toastText">Race Committee Alert</span>
+        </div>
+    </div>
+
+    <!-- CUSTOMIZABLE STARTING SCREEN MODAL -->
+    <div id="startModal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md">
+        <div class="glass-panel max-w-2xl w-full rounded-2xl p-5 sm:p-7 border border-sky-500/30 space-y-5 max-h-[92vh] overflow-y-auto">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div>
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/15 border border-sky-400/30 text-sky-300 text-xs font-extrabold uppercase tracking-wider mb-1">
+                        <i class="fa-solid fa-sailboat"></i> 3v3 Collegiate & High School Format
+                    </div>
+                    <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">C420 Team Racing Simulator</h1>
+                    <p class="text-xs sm:text-sm text-slate-400">Digital N Course • Play 1–4 AI • Visible Puffs, Cover & Rule 18</p>
+                </div>
+                <div class="text-right hidden sm:block">
+                    <div class="text-xs font-bold text-slate-400 uppercase">You Helm</div>
+                    <div class="text-lg font-extrabold text-blue-400 mono">BLUE 1 (B1)</div>
+                    <div class="text-[11px] text-slate-400">Win Combo: Sum ≤ 10 pts</div>
+                </div>
+            </div>
+
+            <!-- Customization Settings Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                <div class="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800">
+                    <label class="block text-[11px] font-extrabold uppercase tracking-wider text-sky-400 mb-2">
+                        <i class="fa-regular fa-clock mr-1"></i> Start Sequence Length
+                    </label>
+                    <select id="selectStartLength" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs sm:text-sm font-bold text-white focus:outline-none focus:border-sky-400">
+                        <option value="10">10s Quick Start</option>
+                        <option value="30" selected>30s Standard Dial-Up</option>
+                        <option value="60">1:00 Pre-Start Sequence</option>
+                        <option value="180">3:00 Full Sound Signal</option>
+                    </select>
+                    <p class="text-[11px] text-slate-400 mt-1.5">Time before the starting gun to hook or post up.</p>
+                </div>
+
+                <div class="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800">
+                    <label class="block text-[11px] font-extrabold uppercase tracking-wider text-amber-400 mb-2">
+                        <i class="fa-solid fa-rotate mr-1"></i> Exoneration Turns ('P')
+                    </label>
+                    <select id="selectPenaltyTurns" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs sm:text-sm font-bold text-white focus:outline-none focus:border-amber-400">
+                        <option value="1" selected>1-Turn Penalty (360°)</option>
+                        <option value="2">2-Turn Penalty (720°)</option>
+                    </select>
+                    <p class="text-[11px] text-slate-400 mt-1.5">Amount of penalty turns needed when fouled.</p>
+                </div>
+
+                <div class="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800">
+                    <label class="block text-[11px] font-extrabold uppercase tracking-wider text-emerald-400 mb-2">
+                        <i class="fa-solid fa-wind mr-1"></i> Breeze & Puffs
+                    </label>
+                    <select id="selectWindMode" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs sm:text-sm font-bold text-white focus:outline-none focus:border-emerald-400">
+                        <option value="shifty" selected>12–15 kt Shifty & Puffy</option>
+                        <option value="puffy">8–13 kt Heavy Lulls & Puffs</option>
+                        <option value="planing">16–20 kt Planing Breeze</option>
+                    </select>
+                    <p class="text-[11px] text-slate-400 mt-1.5">Affects cat's-paw puffs, lulls, and lifts/headers.</p>
+                </div>
+            </div>
+
+            <!-- Controls & Playbook Quick Guide -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900/70 rounded-xl p-3.5 border border-slate-800/90 text-xs">
+                <div class="space-y-1.5">
+                    <div class="font-extrabold text-sky-300 uppercase tracking-wider text-[11px]">C420 Helm & Trim Controls</div>
+                    <div class="flex items-center justify-between text-slate-300"><span>Head Up (Pinch / Luff):</span> <span class="mono font-bold text-sky-400">Hold W</span></div>
+                    <div class="flex items-center justify-between text-slate-300"><span>Bear Away (Foot / Plane):</span> <span class="mono font-bold text-sky-400">Hold S</span></div>
+                    <div class="flex items-center justify-between text-slate-300"><span>Luff Sails / Backwind Cover:</span> <span class="mono font-bold text-emerald-400">Hold SHIFT</span></div>
+                    <div class="flex items-center justify-between text-slate-300"><span>Tack / Gybe / Penalty Spin:</span> <span class="mono font-bold text-amber-300">T / G / P</span></div>
+                    <div class="flex items-center justify-between text-slate-300"><span>Zoom In/Out / Full Course:</span> <span class="mono font-bold text-purple-300">Scroll / Z</span></div>
+                </div>
+                <div class="space-y-1.5">
+                    <div class="font-extrabold text-emerald-300 uppercase tracking-wider text-[11px]">2008 Handbook Bot Plays</div>
+                    <p class="text-slate-300 leading-relaxed text-[11px]">
+                        • <strong class="text-white">Play 1 (1-2-x):</strong> 1 & 2 sail fast + loose cover; 3 fights for 5th.<br>
+                        • <strong class="text-white">Play 2 (2-3-4):</strong> Point in middle, umbrella cover, switch-tacks & M4 Weave.<br>
+                        • <strong class="text-white">Play 4 (1-4-5):</strong> 4 pushes 2-3 forward while 5 hammers & gaps 6.<br>
+                        • <strong class="text-white">Conversions:</strong> Upwind Passbacks, Layline Pins, High-Low & Mark Traps.
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-1">
+                <button id="startRaceBtn" class="btn-game w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-extrabold text-sm sm:text-base tracking-wide border border-sky-300/40 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-flag-checkered"></i> Launch C420 Team Race
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOP HUD: RACE TIMER, SCORE COMBINATION & COURSE PROGRESS -->
+    <div class="fixed top-2 sm:top-3 left-2 sm:left-3 right-2 sm:right-3 z-30 pointer-events-none flex flex-wrap items-start justify-between gap-2">
+        <div class="glass-panel rounded-xl px-3 py-1.5 sm:px-4 sm:py-2.5 pointer-events-auto flex items-center gap-2.5 sm:gap-4 border-l-4 border-l-sky-400">
+            <div>
+                <div id="racePhaseLabel" class="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-sky-400">PRE-START SEQUENCE</div>
+                <div id="raceTimerDisplay" class="text-xl sm:text-2xl md:text-3xl font-extrabold mono tracking-tight text-white">0:30.0</div>
+            </div>
+            <div class="h-8 sm:h-9 w-px bg-slate-700"></div>
+            <div>
+                <div class="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-slate-400">B1 NEXT MARK</div>
+                <div id="nextMarkDisplay" class="text-xs sm:text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                    <i class="fa-solid fa-location-arrow text-xs"></i>
+                    <span>Start Line</span>
+                </div>
+                <div id="penaltyConfigBadge" class="text-[9px] sm:text-[10px] text-slate-400 mono">Rule: 1-Turn (360°)</div>
+            </div>
+        </div>
+
+        <!-- Center: Live 3v3 Team Racing Combination & Standings -->
+        <div class="glass-panel rounded-xl px-3 py-1.5 sm:px-4 sm:py-2 pointer-events-auto flex flex-col items-center border border-slate-700/80 mx-auto sm:mx-0">
+            <div class="flex items-center gap-2 sm:gap-3 flex-wrap justify-center">
+                <div class="text-right">
+                    <span class="text-[10px] sm:text-xs font-extrabold text-blue-400 uppercase tracking-wider">BLUE</span>
+                    <span id="bluePointsDisplay" class="ml-1 px-1.5 py-0.5 rounded bg-blue-500/20 border border-blue-400/40 text-blue-300 font-bold mono text-xs sm:text-sm">10 pts</span>
+                </div>
+                <div id="comboStatusBadge" class="px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[10px] sm:text-xs font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    PLAY 1 (1-3-6)
+                </div>
+                <div class="text-left">
+                    <span id="redPointsDisplay" class="mr-1 px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-rose-300 font-bold mono text-xs sm:text-sm">11 pts</span>
+                    <span class="text-[10px] sm:text-xs font-extrabold text-rose-400 uppercase tracking-wider">RED</span>
+                </div>
+            </div>
+            <div id="orderPillsContainer" class="flex flex-wrap items-center justify-center gap-1 mt-1"></div>
+        </div>
+
+        <!-- Right: View Controls & Quick Actions -->
+        <div class="glass-panel rounded-xl p-1.5 sm:p-2 pointer-events-auto flex flex-wrap items-center gap-1.5 ml-auto sm:ml-0">
+            <button id="zoomOutBtn" class="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-600 transition" title="Zoom Out (Scroll Down)">
+                <i class="fa-solid fa-magnifying-glass-minus"></i>
+            </button>
+            <span id="zoomLevelText" class="text-[10px] sm:text-[11px] font-bold mono text-sky-300 min-w-[38px] text-center">85%</span>
+            <button id="zoomInBtn" class="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-600 transition" title="Zoom In (Scroll Up)">
+                <i class="fa-solid fa-magnifying-glass-plus"></i>
+            </button>
+            <button id="toggleCameraBtn" class="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-600 flex items-center gap-1.5 transition" title="Toggle Tactical Follow / Full Course Camera (Z)">
+                <i class="fa-solid fa-video text-sky-400"></i>
+                <span id="camModeText" class="hidden sm:inline">Cam: Follow (Z)</span>
+            </button>
+            <button id="toggleOverlaysBtn" class="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-600 flex items-center gap-1.5 transition" title="Toggle Visible Wind Shadows & Puffs">
+                <i class="fa-solid fa-wind text-emerald-400"></i>
+                <span class="hidden sm:inline">Shadows: ON</span>
+            </button>
+            <button id="openSetupBtn" class="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-300 border border-slate-600 flex items-center gap-1.5 transition" title="Back to Start Screen">
+                <i class="fa-solid fa-house"></i>
+                <span>Start Screen</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- LEFT HUD: LIVE TEAM RACING TACTICAL RADIO FEED -->
+    <div class="fixed left-3 top-24 z-20 pointer-events-none hidden xl:flex flex-col gap-2 w-72">
+        <div class="glass-panel rounded-xl p-3 border border-slate-700/70">
+            <div class="flex items-center justify-between text-[11px] font-extrabold uppercase tracking-wider text-sky-400 mb-2">
+                <span><i class="fa-solid fa-tower-broadcast mr-1"></i> Team Play Comms</span>
+                <span id="activePlayCallout" class="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 mono">PLAY 1</span>
+            </div>
+            <div id="tacticalFeed" class="space-y-1.5 text-[11px] text-slate-300 max-h-44 overflow-hidden"></div>
+        </div>
+    </div>
+
+    <!-- BOTTOM HUD: B1 TELEMETRY, TRIM/POINT METER & TOUCH CONTROLS -->
+    <div class="fixed bottom-2 sm:bottom-3 left-2 sm:left-3 right-2 sm:right-3 z-30 pointer-events-none flex flex-col lg:flex-row items-stretch lg:items-end justify-between gap-2">
+        <div class="glass-panel rounded-xl p-2 sm:p-3 pointer-events-auto w-full lg:w-auto flex flex-wrap items-center justify-around sm:justify-start gap-2.5 sm:gap-4 border-l-4 border-l-blue-500">
+            <div>
+                <div class="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400">B1 SPEED</div>
+                <div class="flex items-baseline gap-1">
+                    <span id="hudSpeed" class="text-lg sm:text-2xl font-extrabold mono text-white">0.0</span>
+                    <span class="text-[10px] sm:text-xs text-slate-400 font-semibold">kts</span>
+                </div>
+                <div id="hudPointMode" class="text-[10px] sm:text-[11px] font-bold text-emerald-400">Optimal VMG</div>
+            </div>
+
+            <div class="h-8 sm:h-10 w-px bg-slate-700"></div>
+
+            <div>
+                <div class="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400">TWA / TACK</div>
+                <div class="flex items-center gap-1.5">
+                    <span id="hudTWA" class="text-base sm:text-xl font-extrabold mono text-sky-300">42°</span>
+                    <span id="hudTackBadge" class="px-1.5 py-0.5 text-[9px] sm:text-[10px] font-extrabold rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">STBD</span>
+                </div>
+                <div id="hudClearAir" class="text-[10px] sm:text-[11px] font-semibold text-slate-300">Clear Air (100%)</div>
+            </div>
+
+            <div class="h-8 sm:h-10 w-px bg-slate-700"></div>
+
+            <div>
+                <div class="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400">LOCAL WIND</div>
+                <div class="flex items-center gap-1.5">
+                    <span id="hudWindSpeed" class="text-sm sm:text-lg font-bold mono text-white">14.0 kts</span>
+                </div>
+                <div id="hudShiftIndicator" class="text-[10px] sm:text-[11px] font-bold text-amber-300">Even (0° Shift)</div>
+            </div>
+
+            <div id="hudPenaltyBox" class="hidden pl-2 border-l border-slate-700">
+                <div class="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-rose-600/30 border border-rose-500 text-rose-200 animate-pulse">
+                    <div class="text-[9px] sm:text-[10px] font-extrabold uppercase">PENALTY ACTIVE!</div>
+                    <div id="hudPenaltyText" class="text-[10px] sm:text-xs font-bold mono">Press 'P' to Spin</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Interactive Keyboard / Touch Helm Buttons -->
+        <div class="glass-panel rounded-xl p-1.5 sm:p-2.5 pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 w-full lg:w-auto">
+            <button id="btnHeadUp" class="btn-game flex-1 sm:flex-none px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-sky-600 border border-slate-600 text-[11px] sm:text-xs font-bold text-white flex flex-col items-center min-w-[54px] sm:min-w-[68px]">
+                <span class="key-badge mb-0.5 sm:mb-1" id="keyW">W</span>
+                <span>Head Up</span>
+            </button>
+            <button id="btnHeadDown" class="btn-game flex-1 sm:flex-none px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-sky-600 border border-slate-600 text-[11px] sm:text-xs font-bold text-white flex flex-col items-center min-w-[54px] sm:min-w-[68px]">
+                <span class="key-badge mb-0.5 sm:mb-1" id="keyS">S</span>
+                <span>Bear Away</span>
+            </button>
+            <button id="btnLuff" class="btn-game flex-1 sm:flex-none px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 active:bg-emerald-600 border border-emerald-500/50 text-[11px] sm:text-xs font-bold text-emerald-200 flex flex-col items-center min-w-[54px] sm:min-w-[68px]">
+                <span class="key-badge mb-0.5 sm:mb-1" id="keyShift">SHIFT</span>
+                <span>Luff / Slow</span>
+            </button>
+            <div class="hidden sm:block h-10 w-px bg-slate-700 mx-0.5"></div>
+            <button id="btnTack" class="btn-game flex-1 sm:flex-none px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg bg-sky-900/70 hover:bg-sky-800 border border-sky-500/50 text-[11px] sm:text-xs font-bold text-sky-200 flex flex-col items-center min-w-[50px] sm:min-w-[64px]">
+                <span class="key-badge mb-0.5 sm:mb-1" id="keyT">T</span>
+                <span>Tack</span>
+            </button>
+            <button id="btnGybe" class="btn-game flex-1 sm:flex-none px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg bg-indigo-900/70 hover:bg-indigo-800 border border-indigo-500/50 text-[11px] sm:text-xs font-bold text-indigo-200 flex flex-col items-center min-w-[50px] sm:min-w-[64px]">
+                <span class="key-badge mb-0.5 sm:mb-1" id="keyG">G</span>
+                <span>Gybe</span>
+            </button>
+            <button id="btnPenalty" class="btn-game flex-1 sm:flex-none px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg bg-amber-900/70 hover:bg-amber-800 border border-amber-500/50 text-[11px] sm:text-xs font-bold text-amber-200 flex flex-col items-center min-w-[54px] sm:min-w-[68px]">
+                <span class="key-badge mb-0.5 sm:mb-1" id="keyP">P</span>
+                <span id="btnPenaltyLabel">Spin 360°</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- FINISH RESULTS MODAL -->
+    <div id="finishModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+        <div class="glass-panel max-w-lg w-full rounded-2xl p-6 border border-sky-500/40 text-center space-y-5 max-h-[92vh] overflow-y-auto">
+            <div id="finishBannerBadge" class="inline-block px-4 py-1 rounded-full text-xs font-extrabold uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                REGATTA RESULT
+            </div>
+            <h2 id="finishTitle" class="text-3xl font-extrabold text-white">BLUE TEAM WINS!</h2>
+            <p id="finishSubtitle" class="text-sm text-slate-300">Winning Combination: 1-2-5 (8 pts vs 13 pts)</p>
+
+            <div id="finishOrderTable" class="bg-slate-900/80 rounded-xl p-4 border border-slate-800 text-left space-y-2 text-xs"></div>
+
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                <button id="playAgainBtn" class="btn-game w-full sm:w-auto px-6 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-extrabold border-sky-700 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-rotate-right"></i> Race Again
+                </button>
+                <button id="changeSettingsBtn" class="btn-game w-full sm:w-auto px-6 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-extrabold border-slate-950 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-house"></i> Back to Start Screen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth || 1200;
+            canvas.height = window.innerHeight || 800;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // ============================================================================
+        // GLOBAL CONFIGURATION, COURSE GEOMETRY & GAME STATE
+        // ============================================================================
+        const WORLD_WIDTH = 3400;
+        const WORLD_HEIGHT = 2600;
+        const BOAT_LENGTH = 44;
+        const THREE_BL_RADIUS = BOAT_LENGTH * 3; // 132px Rule 18 Zone
+        const MARK_RADIUS = 14;
+
+        const config = {
+            startLengthSec: 30,
+            penaltyTurnsRequired: 1,
+            windMode: 'shifty',
+            showOverlays: true,
+            cameraFollow: true,
+            userZoom: 0.85
+        };
+
+        // Box-Style Digital N Course (matching the 2008 Team Racing Handbook diagram)
+        const COURSE = {
+            startPin: { x: 460, y: 2050, radius: 13 },
+            startRC:  { x: 960, y: 2050, radius: 18 },
+            mark1:    { x: 710, y: 620,  radius: MARK_RADIUS, name: 'Mark 1 (Windward)', leave: 'STBD' },
+            mark2:    { x: 1560, y: 620, radius: MARK_RADIUS, name: 'Mark 2 (Offset)',   leave: 'STBD' },
+            mark3:    { x: 1560, y: 1980, radius: MARK_RADIUS, name: 'Mark 3 (Leeward)', leave: 'PORT' },
+            mark4:    { x: 2410, y: 1980, radius: MARK_RADIUS, name: 'Mark 4 (Bottom Offset)', leave: 'PORT' },
+            finishPin:{ x: 2210, y: 580, radius: 13 },
+            finishRC: { x: 2690, y: 580, radius: 18 }
+        };
+
+        const gameState = {
+            running: false,
+            phase: 'PRESTART',
+            timer: 30.0,
+            wind: {
+                baseDir: 0,
+                currentDir: 0,
+                baseSpeed: 13.5,
+                shiftAngle: 0,
+                phase1: 0,
+                phase2: 1.7,
+                puffs: []
+            },
+            boats: [],
+            finishOrder: [],
+            radioLogs: [],
+            activePlays: {
+                BLUE: { code: 'PLAY 1', label: '1-2 Fast & Loose Cover' },
+                RED:  { code: 'PLAY 1', label: '1-2 Fast & Loose Cover' }
+            },
+            camera: {
+                x: 710,
+                y: 2050,
+                zoom: 0.85
+            },
+            lastTime: performance.now()
+        };
+
+        const inputState = {
+            headUp: false,
+            headDown: false,
+            luff: false
+        };
+
+        // Angle & Vector Helpers (0 deg = North/Up, 90 = East/Right, 180 = South/Down, -90 = West/Left)
+        function wrapAngle180(deg) {
+            let a = (deg + 180) % 360;
+            if (a < 0) a += 360;
+            return a - 180;
+        }
+
+        function angleDiff(target, current) {
+            return wrapAngle180(target - current);
+        }
+
+        function degToRad(deg) {
+            return deg * Math.PI / 180;
+        }
+
+        function headingToVector(deg) {
+            const rad = degToRad(deg);
+            return { x: Math.sin(rad), y: -Math.cos(rad) };
+        }
+
+        function vectorToHeading(dx, dy) {
+            return wrapAngle180(Math.atan2(dx, -dy) * 180 / Math.PI);
+        }
+
+        function distBetween(a, b) {
+            return Math.hypot(a.x - b.x, a.y - b.y);
+        }
+
+        let toastTimeout = null;
+        function showToast(msg) {
+            const el = document.getElementById('toastAlert');
+            const txt = document.getElementById('toastText');
+            if (!el || !txt) return;
+            txt.textContent = msg;
+            el.classList.remove('opacity-0');
+            el.classList.add('opacity-100');
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                el.classList.remove('opacity-100');
+                el.classList.add('opacity-0');
+            }, 2800);
+        }
+
+        function logRadio(boatId, team, message) {
+            const nowStr = gameState.phase === 'PRESTART'
+                ? `-${Math.ceil(gameState.timer)}s`
+                : `${Math.floor(gameState.timer / 60)}:${String(Math.floor(gameState.timer % 60)).padStart(2, '0')}`;
+            gameState.radioLogs.unshift({ boatId, team, message, time: nowStr });
+            if (gameState.radioLogs.length > 7) gameState.radioLogs.pop();
+
+            const feed = document.getElementById('tacticalFeed');
+            if (!feed) return;
+            feed.innerHTML = gameState.radioLogs.map(item => {
+                const c = item.team === 'BLUE' ? 'text-blue-400' : 'text-rose-400';
+                return `<div class="leading-tight border-b border-slate-800/80 pb-1 last:border-0">
+                    <span class="mono text-[10px] text-slate-500">[${item.time}]</span>
+                    <span class="font-extrabold ${c}">${item.boatId}:</span>
+                    <span class="text-slate-200">${item.message}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // ============================================================================
+        // DYNAMIC WIND FIELD: VISIBLE PUFFS, LULLS, LIFTS & HEADERS
+        // ============================================================================
+        function initWindField() {
+            if (config.windMode === 'planing') {
+                gameState.wind.baseSpeed = 17.5;
+            } else if (config.windMode === 'puffy') {
+                gameState.wind.baseSpeed = 10.5;
+            } else {
+                gameState.wind.baseSpeed = 13.5;
+            }
+            gameState.wind.puffs = [];
+            for (let i = 0; i < 16; i++) {
+                spawnPuffOrLull(true);
+            }
+        }
+
+        function spawnPuffOrLull(randomY = false) {
+            const isPuff = Math.random() < 0.65;
+            const radius = 170 + Math.random() * 160;
+            const deltaKnots = isPuff
+                ? (2.5 + Math.random() * 3.8)
+                : -(2.2 + Math.random() * 2.8);
+            const localShift = (Math.random() - 0.5) * (isPuff ? 14 : 9);
+            gameState.wind.puffs.push({
+                x: 220 + Math.random() * (WORLD_WIDTH - 440),
+                y: randomY ? (200 + Math.random() * (WORLD_HEIGHT - 350)) : (180 + Math.random() * 220),
+                radius,
+                type: isPuff ? 'PUFF' : 'LULL',
+                deltaKnots,
+                localShift,
+                seed: Math.random() * 100
+            });
+        }
+
+        function updateWindField(dt) {
+            gameState.wind.phase1 += dt * 0.22;
+            gameState.wind.phase2 += dt * 0.09;
+            const maxOsc = config.windMode === 'shifty' ? 12 : 8;
+            gameState.wind.shiftAngle = Math.sin(gameState.wind.phase1) * (maxOsc * 0.65) + Math.cos(gameState.wind.phase2) * (maxOsc * 0.35);
+            gameState.wind.currentDir = wrapAngle180(gameState.wind.baseDir + gameState.wind.shiftAngle);
+
+            const flowVec = headingToVector(wrapAngle180(gameState.wind.currentDir + 180));
+            for (let i = gameState.wind.puffs.length - 1; i >= 0; i--) {
+                const p = gameState.wind.puffs[i];
+                p.x += flowVec.x * 26 * dt;
+                p.y += flowVec.y * 26 * dt;
+                if (p.y > WORLD_HEIGHT + 250) {
+                    gameState.wind.puffs.splice(i, 1);
+                    spawnPuffOrLull(false);
+                }
+            }
+        }
+
+        function getWindAt(x, y) {
+            let speed = gameState.wind.baseSpeed;
+            let shift = gameState.wind.shiftAngle;
+            let puffLabel = '';
+
+            for (const p of gameState.wind.puffs) {
+                const d = Math.hypot(x - p.x, y - p.y);
+                if (d < p.radius) {
+                    const falloff = Math.pow(1 - d / p.radius, 1.35);
+                    speed += p.deltaKnots * falloff;
+                    shift += p.localShift * falloff;
+                    if (falloff > 0.28) {
+                        puffLabel = p.type === 'PUFF' ? `PUFF +${(p.deltaKnots * falloff).toFixed(1)}kt` : `LULL ${(p.deltaKnots * falloff).toFixed(1)}kt`;
+                    }
+                }
+            }
+
+            speed = Math.max(5.0, Math.min(24.0, speed));
+            const dir = wrapAngle180(gameState.wind.baseDir + shift);
+            return { speed, dir, shift, puffLabel };
+        }
+
+        // ============================================================================
+        // C420 POLAR SPEED CURVE & SAIL TRIM
+        // ============================================================================
+        function evaluateC420Polar(twaAbs, windSpeed) {
+            let polarRatio = 0;
+            let pointState = 'Optimal VMG';
+            let inIrons = false;
+
+            if (twaAbs < 29) {
+                inIrons = true;
+                polarRatio = 0.08 * (twaAbs / 29);
+                pointState = 'In Irons';
+            } else if (twaAbs < 39) {
+                const t = (twaAbs - 29) / 10;
+                polarRatio = 0.18 + 0.50 * t;
+                pointState = 'Pinching (High/Slow)';
+            } else if (twaAbs <= 46) {
+                polarRatio = 0.68 + 0.06 * ((twaAbs - 39) / 7);
+                pointState = 'Optimal VMG';
+            } else if (twaAbs <= 65) {
+                const t = (twaAbs - 46) / 19;
+                polarRatio = 0.74 + 0.16 * t;
+                pointState = 'Planing / Footing Fast';
+            } else if (twaAbs <= 115) {
+                const planeBoost = windSpeed > 14 ? 0.14 : 0.05;
+                polarRatio = 0.92 + planeBoost * Math.sin(((twaAbs - 65) / 50) * Math.PI);
+                pointState = 'Planing / Footing Fast';
+            } else if (twaAbs <= 152) {
+                polarRatio = 0.84 - 0.06 * ((twaAbs - 115) / 37);
+                pointState = 'Optimal VMG';
+            } else {
+                polarRatio = 0.73;
+                pointState = 'Downwind Run';
+            }
+
+            const baseBoatKnots = windSpeed * 0.46 * polarRatio;
+            return { targetKnots: baseBoatKnots, pointState, inIrons };
+        }
+
+        // ============================================================================
+        // C420 BOAT CLASS (PHYSICS, RRS 10-18, ROUNDINGS & 2008 HANDBOOK AI)
+        // ============================================================================
+        class Boat {
+            constructor(id, team, isPlayer, x, y, heading) {
+                this.id = id;
+                this.team = team;
+                this.isPlayer = isPlayer;
+                this.x = x;
+                this.y = y;
+                this.prevX = x;
+                this.prevY = y;
+                this.heading = heading;
+                this.speed = 3.2;
+                this.leg = 0; // 0: Start, 1: M1, 2: M2, 3: M3, 4: M4, 5: Finish, 6: Done
+                this.roundStage = 0;
+                this.finished = false;
+                this.finishTime = 0;
+                this.ocs = false;
+
+                this.tack = 'STBD';
+                this.twa = 45;
+                this.SignedTWA = -45;
+                this.luffing = false;
+                this.inIrons = false;
+                this.pointState = 'Optimal VMG';
+
+                this.shadowFactor = 0;
+                this.shadowHeader = 0;
+                this.leeBowedBy = null;
+
+                this.penalties = 0;
+                this.spinning = false;
+                this.spinProgress = 0;
+                this.spinDir = 1;
+                this.foulCooldown = 0;
+
+                // Rule 18 Zone tracking
+                this.inZoneMark = null;
+                this.zoneEntryTime = 0;
+                this.r18Status = '';
+
+                // AI Playbook state
+                this.roleBadge = '';
+                this.targetHeading = heading;
+                this.aiTackCooldown = 0;
+                this.weaveStage = 0;
+                this.wake = [];
+            }
+
+            triggerTack() {
+                if (this.spinning || this.finished) return;
+                const localWind = getWindAt(this.x, this.y);
+                const targetTWA = Math.max(41, Math.min(52, Math.abs(this.twa)));
+                const newSigned = this.tack === 'STBD' ? targetTWA : -targetTWA;
+                this.targetHeading = wrapAngle180(localWind.dir + 180 + newSigned);
+                this.aiTackCooldown = 3.2;
+            }
+
+            triggerGybe() {
+                if (this.spinning || this.finished) return;
+                const localWind = getWindAt(this.x, this.y);
+                const targetTWA = Math.max(138, Math.min(162, Math.abs(this.twa)));
+                const newSigned = this.tack === 'STBD' ? targetTWA : -targetTWA;
+                this.targetHeading = wrapAngle180(localWind.dir + 180 + newSigned);
+                this.aiTackCooldown = 3.0;
+            }
+
+            triggerPenaltySpin() {
+                if (this.spinning || this.finished) return;
+                this.spinning = true;
+                this.spinProgress = 0;
+                this.spinDir = this.tack === 'STBD' ? 1 : -1;
+            }
+
+            canSafelyTack() {
+                for (const other of gameState.boats) {
+                    if (other === this || other.finished) continue;
+                    if (distBetween(this, other) < BOAT_LENGTH * 1.65) return false;
+                }
+                return true;
+            }
+
+            update(dt, rankMap) {
+                this.prevX = this.x;
+                this.prevY = this.y;
+                if (this.foulCooldown > 0) this.foulCooldown -= dt;
+                if (this.aiTackCooldown > 0) this.aiTackCooldown -= dt;
+
+                const localWind = getWindAt(this.x, this.y);
+                const effectiveWindDir = wrapAngle180(localWind.dir + this.shadowHeader);
+
+                if (this.spinning) {
+                    const spinRate = 145;
+                    const deltaDeg = spinRate * dt;
+                    this.heading = wrapAngle180(this.heading + deltaDeg * this.spinDir);
+                    this.spinProgress += deltaDeg;
+                    this.speed = Math.max(1.6, this.speed * 0.97);
+                    const reqDeg = config.penaltyTurnsRequired * 360;
+                    if (this.spinProgress >= reqDeg) {
+                        this.spinning = false;
+                        this.spinProgress = 0;
+                        if (this.penalties > 0) this.penalties--;
+                        showToast(`${this.id} completed exoneration spin!`);
+                    }
+                } else if (this.isPlayer && !this.finished) {
+                    this.luffing = inputState.luff;
+                    const turnRate = 68;
+                    const signedTWA = wrapAngle180(this.heading - wrapAngle180(effectiveWindDir + 180));
+                    const windSign = signedTWA >= 0 ? 1 : -1;
+
+                    if (inputState.headUp) {
+                        this.heading = wrapAngle180(this.heading - windSign * turnRate * dt);
+                        this.targetHeading = this.heading;
+                    } else if (inputState.headDown) {
+                        this.heading = wrapAngle180(this.heading + windSign * turnRate * dt);
+                        this.targetHeading = this.heading;
+                    } else if (Math.abs(angleDiff(this.targetHeading, this.heading)) > 1.5) {
+                        const diff = angleDiff(this.targetHeading, this.heading);
+                        this.heading = wrapAngle180(this.heading + Math.sign(diff) * Math.min(Math.abs(diff), 92 * dt));
+                    }
+                } else {
+                    this.updateBotAI(dt, localWind, rankMap);
+                    const diff = angleDiff(this.targetHeading, this.heading);
+                    const maxTurn = 86 * dt;
+                    if (Math.abs(diff) <= maxTurn) {
+                        this.heading = this.targetHeading;
+                    } else {
+                        this.heading = wrapAngle180(this.heading + Math.sign(diff) * maxTurn);
+                    }
+                }
+
+                // Signed TWA relative to wind origin:
+                // Wind blowing FROM effectiveWindDir. Upwind is effectiveWindDir.
+                const relToWindFrom = wrapAngle180(this.heading - effectiveWindDir);
+                this.SignedTWA = relToWindFrom;
+                this.twa = Math.abs(relToWindFrom);
+                this.tack = relToWindFrom >= 0 ? 'PORT' : 'STBD';
+
+                const polar = evaluateC420Polar(this.twa, localWind.speed);
+                this.inIrons = polar.inIrons;
+                this.pointState = polar.pointState;
+
+                let targetSpd = polar.targetKnots * (1 - this.shadowFactor);
+                if (this.luffing) {
+                    targetSpd *= 0.36;
+                }
+                if (this.spinning) {
+                    targetSpd *= 0.48;
+                }
+
+                this.speed += (targetSpd - this.speed) * Math.min(1, dt * 2.8);
+
+                const vec = headingToVector(this.heading);
+                const worldSpeedScale = 12.2;
+                this.x += vec.x * this.speed * worldSpeedScale * dt;
+                this.y += vec.y * this.speed * worldSpeedScale * dt;
+
+                // Keep inside venue bounds
+                this.x = Math.max(90, Math.min(WORLD_WIDTH - 90, this.x));
+                this.y = Math.max(90, Math.min(WORLD_HEIGHT - 90, this.y));
+
+                if (Math.random() < 0.45) {
+                    this.wake.push({ x: this.x, y: this.y, alpha: 0.55 });
+                    if (this.wake.length > 26) this.wake.shift();
+                }
+                for (const w of this.wake) w.alpha *= 0.96;
+
+                this.checkCourseProgress();
+            }
+
+            // ========================================================================
+            // 2008 TEAM RACING HANDBOOK BOT AI (PLAYS 1, 2, 3, 4 & CONVERSIONS)
+            // ========================================================================
+            updateBotAI(dt, localWind, rankMap) {
+                this.luffing = false;
+                this.roleBadge = '';
+
+                if (this.finished) {
+                    this.targetHeading = 45;
+                    this.luffing = true;
+                    return;
+                }
+
+                // Automatic Penalty Spin when clear
+                if (this.penalties > 0 && !this.spinning && gameState.phase === 'RACING') {
+                    this.triggerPenaltySpin();
+                    return;
+                }
+
+                // Pre-Start Geographic Start (Pin, Mid, Boat) + Hook / Post Up
+                if (gameState.phase === 'PRESTART') {
+                    const slotIdx = parseInt(this.id[1], 10) - 1;
+                    const lineX = COURSE.startPin.x + 115 + slotIdx * 155 + (this.team === 'RED' ? 38 : 0);
+                    const holdY = COURSE.startPin.y + 85;
+
+                    if (this.y < COURSE.startPin.y + 22) {
+                        // Avoid OCS in pre-start
+                        this.targetHeading = 155;
+                        this.roleBadge = 'DIP LINE';
+                    } else if (gameState.timer > 9) {
+                        const dx = lineX - this.x;
+                        const dy = (holdY + 75) - this.y;
+                        this.targetHeading = vectorToHeading(dx, dy);
+                        if (Math.hypot(dx, dy) < 85) {
+                            this.targetHeading = wrapAngle180(localWind.dir - 46);
+                            this.luffing = true;
+                            this.roleBadge = 'HOLDING LINE';
+                        }
+                    } else {
+                        // Final 9 seconds: accelerate on Starboard to hit the line at the gun
+                        const dx = lineX - this.x;
+                        const dy = (COURSE.startPin.y + 12) - this.y;
+                        this.targetHeading = wrapAngle180(localWind.dir - 43);
+                        if (this.y < COURSE.startPin.y + 42 && gameState.timer > 2.2) {
+                            this.luffing = true;
+                            this.roleBadge = 'TIMING START';
+                        } else {
+                            this.roleBadge = 'FULL SPEED START';
+                        }
+                    }
+                    this.applyRightOfWayAvoidance(localWind);
+                    return;
+                }
+
+                // OCS Clear Dip
+                if (this.ocs) {
+                    const midX = (COURSE.startPin.x + COURSE.startRC.x) * 0.5;
+                    this.targetHeading = vectorToHeading(midX - this.x, (COURSE.startPin.y + 45) - this.y);
+                    this.roleBadge = 'CLEARING OCS';
+                    this.applyRightOfWayAvoidance(localWind);
+                    return;
+                }
+
+                const myRank = rankMap.get(this.id) || 3;
+                const teammates = gameState.boats.filter(b => b.team === this.team && !b.finished);
+                const opponents = gameState.boats.filter(b => b.team !== this.team && !b.finished);
+                const teamPlaces = gameState.boats
+                    .filter(b => b.team === this.team)
+                    .map(b => rankMap.get(b.id) || 6)
+                    .sort((a, b) => a - b);
+                const teamSum = teamPlaces.reduce((a, b) => a + b, 0);
+                const isWinning = teamSum <= 10;
+
+                // Base navigation target for current leg
+                let navTarget = this.getWaypointForCurrentLeg();
+                let desiredHeading = this.computeSailingHeadingTo(navTarget.x, navTarget.y, localWind);
+
+                // Determine 2008 Handbook Play & Role
+                const has12 = teamPlaces[0] === 1 && teamPlaces[1] === 2;
+                const has234 = teamPlaces[0] === 2 && teamPlaces[1] === 3 && teamPlaces[2] === 4;
+                const has145 = teamPlaces[0] === 1 && teamPlaces[1] === 4 && teamPlaces[2] === 5;
+
+                if (has12) {
+                    // PLAY 1 (1, 2, anything)
+                    if (myRank <= 2) {
+                        this.roleBadge = 'PLAY 1: FAST COVER';
+                        const behindOpp = opponents.find(o => (rankMap.get(o.id) || 6) === myRank + 1);
+                        if (behindOpp && (this.leg === 1 || this.leg === 5) && Math.abs(behindOpp.x - this.x) < 220) {
+                            const coverX = behindOpp.x + (navTarget.x - behindOpp.x) * 0.25;
+                            desiredHeading = this.computeSailingHeadingTo(coverX, navTarget.y, localWind);
+                        }
+                    } else if (myRank === 3 && this.leg === 2) {
+                        // Play 3: 3 slows 4-5-6 at top reach offset Mark 2
+                        const opp4 = opponents.find(o => (rankMap.get(o.id) || 6) === 4);
+                        if (opp4 && distBetween(this, opp4) < 190) {
+                            this.luffing = true;
+                            this.roleBadge = 'PLAY 3: SLOW 4-5-6';
+                        }
+                    } else {
+                        this.roleBadge = 'PLAY 1: FIGHT FOR 5TH';
+                    }
+                } else if (has234) {
+                    // PLAY 2 (2, 3, 4 Pyramid Umbrella & M4 Weave)
+                    if (myRank === 2) {
+                        this.roleBadge = 'PLAY 2: POINT (MID)';
+                    } else {
+                        this.roleBadge = 'PLAY 2: UMBRELLA WING';
+                        const trailingOpp = opponents.find(o => (rankMap.get(o.id) || 6) > myRank && distBetween(this, o) < 260);
+                        if (trailingOpp && (this.leg === 1 || this.leg === 5)) {
+                            desiredHeading = this.computeSailingHeadingTo(trailingOpp.x, navTarget.y, localWind);
+                            if (distBetween(this, trailingOpp) < 115 && this.y < trailingOpp.y) {
+                                this.luffing = true;
+                                this.roleBadge = 'PLAY 2: BALANCE SLOW';
+                            }
+                        }
+                    }
+                } else if (has145) {
+                    // PLAY 4 (1, 4, 5): 1 stays close, 4 pushes 2-3, 5 hammers & gaps 6
+                    if (myRank === 1) {
+                        this.roleBadge = 'PLAY 4: KEEP 1ST';
+                    } else if (myRank === 4) {
+                        this.roleBadge = 'PLAY 4: PUSH 2-3';
+                    } else if (myRank === 5) {
+                        const opp6 = opponents.find(o => (rankMap.get(o.id) || 6) === 6);
+                        if (opp6 && distBetween(this, opp6) < 230) {
+                            this.roleBadge = 'PLAY 4: GAP 6TH!';
+                            desiredHeading = this.computeSailingHeadingTo(opp6.x, opp6.y - 45, localWind);
+                            if (distBetween(this, opp6) < 110 && this.y < opp6.y) {
+                                this.luffing = true;
+                            }
+                        }
+                    }
+                } else if (!isWinning) {
+                    // LOSING CONVERSION PLAYS: Passback, Mark Trap, Layline Pin, or High-Low
+                    const trailingMate = teammates.find(m => m !== this && (rankMap.get(m.id) || 6) > myRank && distBetween(this, m) < 380);
+                    const targetOpp = opponents.find(o => {
+                        const r = rankMap.get(o.id) || 6;
+                        return r > myRank && trailingMate && r < (rankMap.get(trailingMate.id) || 6) && distBetween(this, o) < 240;
+                    });
+
+                    if (targetOpp && trailingMate) {
+                        const markDist = distBetween(this, navTarget);
+                        if (markDist < THREE_BL_RADIUS * 1.45 && distBetween(this, targetOpp) < 125) {
+                            // MARK TRAP: Slam on brakes at zone entry so teammate sails inside/around
+                            this.luffing = true;
+                            this.roleBadge = `MARK TRAP ${targetOpp.id}`;
+                            desiredHeading = wrapAngle180(localWind.dir - 35);
+                        } else if (this.leg === 1 || this.leg === 5) {
+                            // UPWIND PASSBACK / PINNING (aim slightly behind escape path, then luff/backwind)
+                            const pinX = targetOpp.x + (this.tack === 'STBD' ? 26 : -26);
+                            const pinY = targetOpp.y - 22;
+                            desiredHeading = vectorToHeading(pinX - this.x, pinY - this.y);
+                            if (distBetween(this, targetOpp) < 95) {
+                                this.luffing = true;
+                                desiredHeading = wrapAngle180(localWind.dir + (this.tack === 'STBD' ? -33 : 33));
+                            }
+                            this.roleBadge = `PASSBACK ${targetOpp.id}`;
+                        } else if (this.leg === 3) {
+                            // DOWNWIND HIGH-LOW / LUFF PASSBACK
+                            desiredHeading = vectorToHeading(targetOpp.x - this.x, targetOpp.y - this.y);
+                            if (distBetween(this, targetOpp) < 90) {
+                                this.luffing = true;
+                            }
+                            this.roleBadge = `HIGH-LOW ${targetOpp.id}`;
+                        }
+                    } else {
+                        this.roleBadge = 'CATCHING LEADERS';
+                    }
+                }
+
+                this.targetHeading = desiredHeading;
+                this.applyRightOfWayAvoidance(localWind);
+            }
+
+            getWaypointForCurrentLeg() {
+                if (this.leg === 0) {
+                    return { x: (COURSE.startPin.x + COURSE.startRC.x) * 0.5, y: COURSE.startPin.y - 60 };
+                } else if (this.leg === 1) {
+                    // Round Mark 1 to Starboard (approach West, exit North-East)
+                    if (this.roundStage === 0) {
+                        return { x: COURSE.mark1.x - 46, y: COURSE.mark1.y - 24 };
+                    }
+                    return { x: COURSE.mark1.x + 65, y: COURSE.mark1.y - 42 };
+                } else if (this.leg === 2) {
+                    // Round Mark 2 to Starboard (approach North, exit East-South)
+                    if (this.roundStage === 0) {
+                        return { x: COURSE.mark2.x + 28, y: COURSE.mark2.y - 46 };
+                    }
+                    return { x: COURSE.mark2.x + 48, y: COURSE.mark2.y + 55 };
+                } else if (this.leg === 3) {
+                    // Round Mark 3 to Port (approach West, exit South-East)
+                    if (this.roundStage === 0) {
+                        return { x: COURSE.mark3.x - 48, y: COURSE.mark3.y + 28 };
+                    }
+                    return { x: COURSE.mark3.x + 60, y: COURSE.mark3.y + 44 };
+                } else if (this.leg === 4) {
+                    // Round Mark 4 to Port (approach South, exit East-North)
+                    if (this.roundStage === 0) {
+                        return { x: COURSE.mark4.x + 32, y: COURSE.mark4.y + 46 };
+                    }
+                    return { x: COURSE.mark4.x + 46, y: COURSE.mark4.y - 60 };
+                } else {
+                    // Leg 5: Aim squarely inside the Finish Line between Finish Pin and Finish RC
+                    const midFinishX = (COURSE.finishPin.x + COURSE.finishRC.x) * 0.5;
+                    return { x: midFinishX, y: COURSE.finishPin.y - 45 };
+                }
+            }
+
+            computeSailingHeadingTo(tx, ty, localWind) {
+                const dx = tx - this.x;
+                const dy = ty - this.y;
+                const directHeading = vectorToHeading(dx, dy);
+                const relToWind = wrapAngle180(directHeading - localWind.dir);
+
+                // Upwind Beat Logic (tacking on laylines or shifts, especially into Finish Line)
+                if (Math.abs(relToWind) < 43) {
+                    const optimalTWA = 42;
+                    const stbdHeading = wrapAngle180(localWind.dir - optimalTWA);
+                    const portHeading = wrapAngle180(localWind.dir + optimalTWA);
+
+                    // Corridor bounds so boats tack cleanly into Mark 1 or between Finish Pin & Finish RC
+                    const leftBound = this.leg === 5 ? COURSE.finishPin.x + 35 : tx - 210;
+                    const rightBound = this.leg === 5 ? COURSE.finishRC.x - 35 : tx + 210;
+
+                    if (this.x < leftBound && this.tack === 'STBD' && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                        this.aiTackCooldown = 3.0;
+                        return portHeading;
+                    }
+                    if (this.x > rightBound && this.tack === 'PORT' && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                        this.aiTackCooldown = 3.0;
+                        return stbdHeading;
+                    }
+                    return this.tack === 'STBD' ? stbdHeading : portHeading;
+                }
+
+                // Downwind Run VMG Logic
+                if (Math.abs(relToWind) > 166) {
+                    const runTWA = 152;
+                    return this.tack === 'STBD'
+                        ? wrapAngle180(localWind.dir - runTWA)
+                        : wrapAngle180(localWind.dir + runTWA);
+                }
+
+                return directHeading;
+            }
+
+            applyRightOfWayAvoidance(localWind) {
+                for (const other of gameState.boats) {
+                    if (other === this || other.finished) continue;
+                    const d = distBetween(this, other);
+                    if (d > BOAT_LENGTH * 2.5) continue;
+
+                    // 2008 Handbook Rule: Switch-tack with teammate when converging on opposite tacks upwind
+                    if (other.team === this.team && this.tack !== other.tack && (this.leg === 1 || this.leg === 5) && d < BOAT_LENGTH * 2.1 && this.aiTackCooldown <= 0) {
+                        this.triggerTack();
+                        this.roleBadge = `SWITCH TACK W/ ${other.id}`;
+                        return;
+                    }
+
+                    // Rule 10: Port keeps clear of Starboard
+                    if (this.tack === 'PORT' && other.tack === 'STBD') {
+                        const bearing = vectorToHeading(other.x - this.x, other.y - this.y);
+                        if (Math.abs(angleDiff(bearing, this.heading)) < 65) {
+                            // Duck stern of Starboard boat
+                            const sternVec = headingToVector(wrapAngle180(other.heading + 180));
+                            const duckX = other.x + sternVec.x * (BOAT_LENGTH * 0.95);
+                            const duckY = other.y + sternVec.y * (BOAT_LENGTH * 0.95);
+                            this.targetHeading = vectorToHeading(duckX - this.x, duckY - this.y);
+                            this.roleBadge = `DUCKING ${other.id}`;
+                            return;
+                        }
+                    }
+
+                    // Rule 11: Same tack overlapped, Windward keeps clear of Leeward
+                    if (this.tack === other.tack && d < BOAT_LENGTH * 1.45) {
+                        const iAmWindward = this.tack === 'STBD' ? (this.x > other.x) : (this.x < other.x);
+                        if (iAmWindward) {
+                            const windSign = this.tack === 'STBD' ? -1 : 1;
+                            this.targetHeading = wrapAngle180(this.targetHeading + windSign * 16);
+                            this.roleBadge = `KEEP CLEAR ${other.id}`;
+                        }
+                    }
+                }
+            }
+
+            checkCourseProgress() {
+                if (this.finished) return;
+
+                // Pre-start / Start Line check
+                if (gameState.phase === 'RACING' && this.leg === 0) {
+                    if (this.prevY >= COURSE.startPin.y && this.y < COURSE.startPin.y &&
+                        this.x >= COURSE.startPin.x - 15 && this.x <= COURSE.startRC.x + 15) {
+                        if (this.ocs) {
+                            this.ocs = false;
+                        } else {
+                            this.leg = 1;
+                            this.roundStage = 0;
+                        }
+                    }
+                    if (this.ocs && this.y > COURSE.startPin.y + 18 &&
+                        this.x >= COURSE.startPin.x - 30 && this.x <= COURSE.startRC.x + 30) {
+                        this.ocs = false;
+                        showToast(`${this.id} dipped and cleared OCS!`);
+                    }
+                }
+
+                // Mark 1 (Windward, Leave to Starboard: pass West then North)
+                if (this.leg === 1) {
+                    const m = COURSE.mark1;
+                    if (this.roundStage === 0 && this.x < m.x + 12 && this.y < m.y + 38) {
+                        this.roundStage = 1;
+                    }
+                    if (this.roundStage === 1 && this.y < m.y + 16 && this.x > m.x) {
+                        this.leg = 2;
+                        this.roundStage = 0;
+                        if (this.isPlayer) showToast('Rounded Mark 1! Head East to Offset Mark 2');
+                    }
+                }
+
+                // Mark 2 (Top Offset, Leave to Starboard: pass North then East)
+                if (this.leg === 2) {
+                    const m = COURSE.mark2;
+                    if (this.roundStage === 0 && this.y < m.y + 14 && this.x > m.x - 38) {
+                        this.roundStage = 1;
+                    }
+                    if (this.roundStage === 1 && this.x > m.x - 10 && this.y > m.y) {
+                        this.leg = 3;
+                        this.roundStage = 0;
+                        if (this.isPlayer) showToast('Rounded Mark 2! Run South to Leeward Mark 3');
+                    }
+                }
+
+                // Mark 3 (Leeward, Leave to Port: pass West then South)
+                if (this.leg === 3) {
+                    const m = COURSE.mark3;
+                    if (this.roundStage === 0 && this.x < m.x + 15 && this.y > m.y - 42) {
+                        this.roundStage = 1;
+                    }
+                    if (this.roundStage === 1 && this.y > m.y - 12 && this.x > m.x) {
+                        this.leg = 4;
+                        this.roundStage = 0;
+                        if (this.isPlayer) showToast('Rounded Mark 3! Reach East to Mark 4');
+                    }
+                }
+
+                // Mark 4 (Bottom Offset, Leave to Port: pass South then East)
+                if (this.leg === 4) {
+                    const m = COURSE.mark4;
+                    if (this.roundStage === 0 && this.y > m.y - 14 && this.x > m.x - 42) {
+                        this.roundStage = 1;
+                    }
+                    if (this.roundStage === 1 && this.x > m.x - 10 && this.y < m.y) {
+                        this.leg = 5;
+                        this.roundStage = 0;
+                        if (this.isPlayer) showToast('Rounded Mark 4! Final Upwind Beat to Finish!');
+                    }
+                }
+
+                // Leg 5: Finish Line (Cross South-to-North between Finish Pin and Finish RC)
+                if (this.leg === 5) {
+                    const fy = COURSE.finishPin.y;
+                    if (this.prevY >= fy && this.y < fy &&
+                        this.x >= COURSE.finishPin.x - 18 && this.x <= COURSE.finishRC.x + 18) {
+                        if (this.penalties > 0) {
+                            if (this.isPlayer) showToast('Complete your penalty spin (P) to record finish!');
+                        } else {
+                            this.finished = true;
+                            this.leg = 6;
+                            this.finishTime = gameState.timer;
+                            gameState.finishOrder.push(this);
+                            showToast(`${this.id} (${this.team}) Finished #${gameState.finishOrder.length}!`);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ============================================================================
+        // WIND SHADOWS, BACKWIND COVER, LEE-BOW & RRS 10-18 ENFORCEMENT
+        // ============================================================================
+        function computeWindShadowsAndLeeBows() {
+            for (const b of gameState.boats) {
+                b.shadowFactor = 0;
+                b.shadowHeader = 0;
+                b.leeBowedBy = null;
+            }
+
+            for (const source of gameState.boats) {
+                if (source.finished) continue;
+                const localWind = getWindAt(source.x, source.y);
+                const downwindDir = wrapAngle180(localWind.dir + 180 + (source.tack === 'STBD' ? -10 : 10));
+                const shadowLen = BOAT_LENGTH * (source.luffing ? 5.1 : 3.9);
+                const halfSpreadDeg = source.luffing ? 24 : 18;
+
+                for (const target of gameState.boats) {
+                    if (target === source || target.finished) continue;
+                    const d = distBetween(source, target);
+
+                    // Downwind/Leeward Wind Shadow Cone
+                    if (d < shadowLen && d > 10) {
+                        const brg = vectorToHeading(target.x - source.x, target.y - source.y);
+                        const offAngle = Math.abs(angleDiff(brg, downwindDir));
+                        if (offAngle < halfSpreadDeg) {
+                            const distFactor = 1 - d / shadowLen;
+                            const angFactor = 1 - offAngle / halfSpreadDeg;
+                            const strength = Math.min(0.45, distFactor * angFactor * (source.luffing ? 0.52 : 0.38));
+                            if (strength > target.shadowFactor) {
+                                target.shadowFactor = strength;
+                                target.shadowHeader = (source.tack === 'STBD' ? 1 : -1) * (8 * distFactor);
+                            }
+                        }
+                    }
+
+                    // Upwind Lee-Bow Slot Exhaust Plume
+                    if (source.twa < 65 && target.twa < 65 && source.tack === target.tack && d < BOAT_LENGTH * 1.9) {
+                        const leeSternDir = wrapAngle180(source.heading + (source.tack === 'STBD' ? -142 : 142));
+                        const brg = vectorToHeading(target.x - source.x, target.y - source.y);
+                        if (Math.abs(angleDiff(brg, leeSternDir)) < 28) {
+                            target.leeBowedBy = source.id;
+                            target.shadowFactor = Math.max(target.shadowFactor, 0.34);
+                            target.shadowHeader = (source.tack === 'STBD' ? 1 : -1) * 9;
+                        }
+                    }
+                }
+            }
+        }
+
+        function enforceRulesAndCollisions() {
+            const marks = [COURSE.startPin, COURSE.startRC, COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4, COURSE.finishPin, COURSE.finishRC];
+
+            // Rule 18 Zone Tracking & Rule 31 Mark Touching
+            for (const b of gameState.boats) {
+                if (b.finished) continue;
+                const activeMark = b.leg === 1 ? COURSE.mark1 : (b.leg === 2 ? COURSE.mark2 : (b.leg === 3 ? COURSE.mark3 : (b.leg === 4 ? COURSE.mark4 : null)));
+                if (activeMark) {
+                    const distM = distBetween(b, activeMark);
+                    if (distM <= THREE_BL_RADIUS) {
+                        if (b.inZoneMark !== activeMark.name) {
+                            b.inZoneMark = activeMark.name;
+                            b.zoneEntryTime = performance.now();
+                        }
+                        b.r18Status = 'R18 ZONE';
+                    } else {
+                        b.inZoneMark = null;
+                        b.r18Status = '';
+                    }
+                } else {
+                    b.inZoneMark = null;
+                    b.r18Status = '';
+                }
+
+                // Rule 31: Touching a mark
+                for (const m of marks) {
+                    const d = distBetween(b, m);
+                    const minR = m.radius + 13;
+                    if (d < minR) {
+                        const nx = (b.x - m.x) / (d || 1);
+                        const ny = (b.y - m.y) / (d || 1);
+                        b.x = m.x + nx * (minR + 2);
+                        b.y = m.y + ny * (minR + 2);
+                    }
+                }
+            }
+
+            // Boat-to-Boat Right of Way & Collisions (Rules 10, 11, 12, 18)
+            for (let i = 0; i < gameState.boats.length; i++) {
+                for (let j = i + 1; j < gameState.boats.length; j++) {
+                    const a = gameState.boats[i];
+                    const b = gameState.boats[j];
+                    if (a.finished || b.finished) continue;
+
+                    const d = distBetween(a, b);
+                    const minSep = 28;
+                    if (d < minSep) {
+                        // Separate hulls
+                        const nx = (b.x - a.x) / (d || 1);
+                        const ny = (b.y - a.y) / (d || 1);
+                        const push = (minSep - d) * 0.52;
+                        a.x -= nx * push;
+                        a.y -= ny * push;
+                        b.x += nx * push;
+                        b.y += ny * push;
+
+                        if (a.foulCooldown <= 0 && b.foulCooldown <= 0 && gameState.phase === 'RACING') {
+                            let offender = null;
+                            let ruleName = '';
+
+                            if (a.tack !== b.tack) {
+                                offender = a.tack === 'PORT' ? a : b;
+                                ruleName = 'Rule 10 (Port/Starboard)';
+                            } else if (a.inZoneMark && a.inZoneMark === b.inZoneMark) {
+                                offender = a.zoneEntryTime > b.zoneEntryTime ? a : b;
+                                ruleName = 'Rule 18 (Mark-Room)';
+                            } else {
+                                const aWindward = a.tack === 'STBD' ? (a.x > b.x) : (a.x < b.x);
+                                offender = aWindward ? a : b;
+                                ruleName = 'Rule 11 (Windward/Leeward)';
+                            }
+
+                            if (offender && offender.penalties < 2) {
+                                offender.penalties++;
+                                a.foulCooldown = 4.5;
+                                b.foulCooldown = 4.5;
+                                showToast(`Umpire Whistle: ${offender.id} penalized under ${ruleName}!`);
+                                logRadio('UMP', offender.team, `${offender.id} penalized (${ruleName})`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ============================================================================
+        // LIVE RANKINGS & SIMULATION STEP
+        // ============================================================================
+        function computeStandings() {
+            const sorted = [...gameState.boats].sort((a, b) => {
+                if (a.finished && b.finished) return a.finishTime - b.finishTime;
+                if (a.finished) return -1;
+                if (b.finished) return 1;
+                if (a.leg !== b.leg) return b.leg - a.leg;
+                const wpA = a.getWaypointForCurrentLeg();
+                const wpB = b.getWaypointForCurrentLeg();
+                return distBetween(a, wpA) - distBetween(b, wpB);
+            });
+            const rankMap = new Map();
+            sorted.forEach((b, idx) => rankMap.set(b.id, idx + 1));
+            return { sorted, rankMap };
+        }
+
+        function updateSimulation(dt) {
+            updateWindField(dt);
+
+            if (gameState.phase === 'PRESTART') {
+                gameState.timer -= dt;
+                if (gameState.timer <= 0) {
+                    gameState.phase = 'RACING';
+                    gameState.timer = 0;
+                    for (const b of gameState.boats) {
+                        if (b.y < COURSE.startPin.y) {
+                            b.ocs = true;
+                            showToast(`${b.id} is OCS! Dip below the Start Line!`);
+                        } else {
+                            b.leg = 1;
+                            b.roundStage = 0;
+                        }
+                    }
+                    showToast('STARTING GUN! Race is On!');
+                    logRadio('RC', 'BLUE', 'Starting Gun! Execute your team racing plays!');
+                }
+            } else if (gameState.phase === 'RACING') {
+                gameState.timer += dt;
+            }
+
+            computeWindShadowsAndLeeBows();
+            const { sorted, rankMap } = computeStandings();
+
+            // Update active play callout for Blue
+            const bluePlaces = sorted
+                .map((b, i) => ({ team: b.team, place: i + 1 }))
+                .filter(x => x.team === 'BLUE')
+                .map(x => x.place);
+            const playCalloutEl = document.getElementById('activePlayCallout');
+            if (bluePlaces[0] === 1 && bluePlaces[1] === 2) {
+                gameState.activePlays.BLUE.code = bluePlaces[2] === 3 ? 'PLAY 3 (1-2-3)' : 'PLAY 1 (1-2-X)';
+            } else if (bluePlaces[0] === 2 && bluePlaces[1] === 3 && bluePlaces[2] === 4) {
+                gameState.activePlays.BLUE.code = 'PLAY 2 (2-3-4)';
+            } else if (bluePlaces[0] === 1 && bluePlaces[1] === 4 && bluePlaces[2] === 5) {
+                gameState.activePlays.BLUE.code = 'PLAY 4 (1-4-5)';
+            } else {
+                const sum = bluePlaces.reduce((a, b) => a + b, 0);
+                gameState.activePlays.BLUE.code = sum <= 10 ? `WINNING (${bluePlaces.join('-')})` : 'ATTACK / PASSBACK';
+            }
+            if (playCalloutEl) playCalloutEl.textContent = gameState.activePlays.BLUE.code;
+
+            for (const boat of gameState.boats) {
+                boat.update(dt, rankMap);
+            }
+
+            enforceRulesAndCollisions();
+
+            // Check if all boats finished or if 5 boats finished
+            const finishedCount = gameState.boats.filter(b => b.finished).length;
+            if (gameState.phase === 'RACING' && finishedCount >= 6) {
+                gameState.phase = 'FINISHED';
+                gameState.running = false;
+                showFinishModal(sorted);
+            }
+
+            // Camera Update
+            const player = gameState.boats.find(b => b.isPlayer);
+            if (config.cameraFollow && player) {
+                gameState.camera.x += (player.x - gameState.camera.x) * 0.14;
+                gameState.camera.y += (player.y - gameState.camera.y) * 0.14;
+                gameState.camera.zoom += (config.userZoom - gameState.camera.zoom) * 0.16;
+            } else {
+                gameState.camera.x += (1580 - gameState.camera.x) * 0.12;
+                gameState.camera.y += (1320 - gameState.camera.y) * 0.12;
+                const scaleX = (canvas.width - 80) / 2800;
+                const scaleY = (canvas.height - 160) / 1900;
+                const targetZ = Math.max(0.26, Math.min(scaleX, scaleY));
+                gameState.camera.zoom += (targetZ - gameState.camera.zoom) * 0.14;
+            }
+
+            const zoomTextEl = document.getElementById('zoomLevelText');
+            if (zoomTextEl) {
+                zoomTextEl.textContent = `${Math.round(gameState.camera.zoom * 100)}%`;
+            }
+
+            updateTelemetryHUD(sorted, player);
+        }
+
+        // ============================================================================
+        // RENDERING: WATER, PUFFS, DIGITAL N COURSE, WIND SHADOWS & C420 BOATS
+        // ============================================================================
+        function renderScene() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Deep water background
+            ctx.fillStyle = '#071c2c';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(canvas.width * 0.5, canvas.height * 0.5);
+            ctx.scale(gameState.camera.zoom, gameState.camera.zoom);
+            ctx.translate(-gameState.camera.x, -gameState.camera.y);
+
+            renderWaterGridAndPuffs();
+            renderCourseAndZones();
+            if (config.showOverlays) {
+                renderWindShadowsAndPlumes();
+            }
+            renderWakes();
+
+            const { rankMap } = computeStandings();
+            for (const b of gameState.boats) {
+                renderC420Boat(b, rankMap.get(b.id) || 1);
+            }
+
+            ctx.restore();
+        }
+
+        function renderWaterGridAndPuffs() {
+            // Subtle tactical water grid
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.06)';
+            ctx.lineWidth = 1;
+            const step = 160;
+            for (let x = 0; x <= WORLD_WIDTH; x += step) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, WORLD_HEIGHT);
+                ctx.stroke();
+            }
+            for (let y = 0; y <= WORLD_HEIGHT; y += step) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(WORLD_WIDTH, y);
+                ctx.stroke();
+            }
+
+            // Visible Puffs (Dark Cat's-Paw Ripples) & Lulls (Glassy Patches)
+            const windRad = degToRad(gameState.wind.currentDir + 180);
+            for (const p of gameState.wind.puffs) {
+                const grad = ctx.createRadialGradient(p.x, p.y, p.radius * 0.1, p.x, p.y, p.radius);
+                if (p.type === 'PUFF') {
+                    grad.addColorStop(0, 'rgba(2, 6, 23, 0.42)');
+                    grad.addColorStop(0.7, 'rgba(15, 23, 42, 0.22)');
+                    grad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+                } else {
+                    grad.addColorStop(0, 'rgba(125, 211, 252, 0.18)');
+                    grad.addColorStop(0.7, 'rgba(56, 189, 248, 0.08)');
+                    grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+                }
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (config.showOverlays && p.type === 'PUFF') {
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(windRad);
+                    ctx.strokeStyle = 'rgba(56, 189, 248, 0.22)';
+                    ctx.lineWidth = 1.5;
+                    for (let k = -2; k <= 2; k++) {
+                        ctx.beginPath();
+                        ctx.arc(k * 28, (k % 2) * 18, 22, -0.6, 0.6);
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+
+                    ctx.fillStyle = 'rgba(125, 211, 252, 0.72)';
+                    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`PUFF +${p.deltaKnots.toFixed(1)}kt`, p.x, p.y - p.radius * 0.55);
+                }
+            }
+        }
+
+        function renderCourseAndZones() {
+            // Dashed Box Digital N Rhumb Lines
+            ctx.save();
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([12, 10]);
+            ctx.beginPath();
+            ctx.moveTo((COURSE.startPin.x + COURSE.startRC.x) * 0.5, COURSE.startPin.y);
+            ctx.lineTo(COURSE.mark1.x, COURSE.mark1.y);
+            ctx.lineTo(COURSE.mark2.x, COURSE.mark2.y);
+            ctx.lineTo(COURSE.mark3.x, COURSE.mark3.y);
+            ctx.lineTo(COURSE.mark4.x, COURSE.mark4.y);
+            ctx.lineTo((COURSE.finishPin.x + COURSE.finishRC.x) * 0.5, COURSE.finishPin.y);
+            ctx.stroke();
+            ctx.restore();
+
+            // Start Line
+            ctx.save();
+            ctx.strokeStyle = gameState.phase === 'PRESTART' ? '#fbbf24' : '#34d399';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 6]);
+            ctx.beginPath();
+            ctx.moveTo(COURSE.startPin.x, COURSE.startPin.y);
+            ctx.lineTo(COURSE.startRC.x, COURSE.startRC.y);
+            ctx.stroke();
+            ctx.restore();
+
+            // Finish Line
+            ctx.save();
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 3.5;
+            ctx.setLineDash([6, 6]);
+            ctx.beginPath();
+            ctx.moveTo(COURSE.finishPin.x, COURSE.finishPin.y);
+            ctx.lineTo(COURSE.finishRC.x, COURSE.finishRC.y);
+            ctx.stroke();
+            ctx.restore();
+
+            // Rule 18 3-Boat-Length Zones & Turning Marks
+            const turningMarks = [COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4];
+            for (const m of turningMarks) {
+                ctx.save();
+                ctx.strokeStyle = m.leave === 'STBD' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(251, 113, 133, 0.25)';
+                ctx.fillStyle = m.leave === 'STBD' ? 'rgba(16, 185, 129, 0.04)' : 'rgba(244, 63, 94, 0.04)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([6, 6]);
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, THREE_BL_RADIUS, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+
+                // Buoy body
+                ctx.fillStyle = '#ef4444';
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#f8fafc';
+                ctx.font = 'bold 12px "Inter", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${m.name} [${m.leave}]`, m.x, m.y - 24);
+            }
+
+            // Start & Finish Pin Buoys
+            for (const pin of [COURSE.startPin, COURSE.finishPin]) {
+                ctx.fillStyle = '#f97316';
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(pin.x, pin.y, pin.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+
+            // Start & Finish RC Boats
+            for (const rc of [{ m: COURSE.startRC, label: 'RC START' }, { m: COURSE.finishRC, label: 'RC FINISH' }]) {
+                ctx.save();
+                ctx.translate(rc.m.x, rc.m.y);
+                ctx.fillStyle = '#dc2626';
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(-14, -26, 28, 52, 12);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 11px "Inter", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(rc.label, 0, 42);
+                ctx.restore();
+            }
+        }
+
+        function renderWindShadowsAndPlumes() {
+            for (const b of gameState.boats) {
+                if (b.finished) continue;
+                const localWind = getWindAt(b.x, b.y);
+                const downwindDir = wrapAngle180(localWind.dir + 180 + (b.tack === 'STBD' ? -10 : 10));
+                const shadowLen = BOAT_LENGTH * (b.luffing ? 5.1 : 3.9);
+                const spreadRad = degToRad(b.luffing ? 24 : 18);
+                const centerRad = degToRad(downwindDir - 90);
+
+                ctx.save();
+                ctx.translate(b.x, b.y);
+                const grad = ctx.createRadialGradient(0, 0, 8, 0, 0, shadowLen);
+                grad.addColorStop(0, b.luffing ? 'rgba(168, 85, 247, 0.34)' : 'rgba(148, 163, 184, 0.24)');
+                grad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, shadowLen, centerRad - spreadRad, centerRad + spreadRad);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function renderWakes() {
+            for (const b of gameState.boats) {
+                for (const w of b.wake) {
+                    ctx.fillStyle = `rgba(226, 232, 240, ${w.alpha * 0.32})`;
+                    ctx.beginPath();
+                    ctx.arc(w.x, w.y, 3.2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        function renderC420Boat(b, rank) {
+            ctx.save();
+            ctx.translate(b.x, b.y);
+            ctx.rotate(degToRad(b.heading));
+
+            // Hull
+            ctx.fillStyle = b.team === 'BLUE' ? '#2563eb' : '#e11d48';
+            ctx.strokeStyle = b.isPlayer ? '#38bdf8' : '#ffffff';
+            ctx.lineWidth = b.isPlayer ? 2.6 : 1.8;
+
+            ctx.beginPath();
+            ctx.moveTo(0, -22);
+            ctx.bezierCurveTo(10, -10, 11, 8, 8, 20);
+            ctx.lineTo(-8, 20);
+            ctx.bezierCurveTo(-11, 8, -10, -10, 0, -22);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Cockpit inner deck
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+            ctx.beginPath();
+            ctx.roundRect(-5, -6, 10, 20, 3);
+            ctx.fill();
+
+            // Mainsail & Jib
+            const boomSide = b.tack === 'STBD' ? 1 : -1;
+            const easeRatio = Math.min(1, Math.max(0.15, (b.twa - 32) / 135));
+            const boomAngle = boomSide * (14 + easeRatio * 64);
+
+            ctx.save();
+            ctx.translate(0, -6);
+            ctx.rotate(degToRad(boomAngle));
+            ctx.strokeStyle = b.luffing ? '#fde047' : '#ffffff';
+            ctx.lineWidth = 2.6;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            if (b.luffing || b.inIrons) {
+                const wave = Math.sin(performance.now() * 0.025) * 4;
+                ctx.quadraticCurveTo(wave, 11, 0, 23);
+            } else {
+                ctx.quadraticCurveTo(boomSide * 6, 11, 0, 23);
+            }
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.restore();
+
+            // Overhead Callout Tag
+            ctx.save();
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            const label = `${b.id} (#${rank})`;
+            ctx.fillStyle = b.team === 'BLUE' ? '#93c5fd' : '#fda4af';
+            ctx.fillText(label, b.x, b.y - 30);
+
+            if (b.penalties > 0) {
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillText(`PEN x${b.penalties}`, b.x, b.y - 43);
+            } else if (b.roleBadge) {
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = 'bold 10px "Inter", sans-serif';
+                ctx.fillText(b.roleBadge, b.x, b.y + 34);
+            }
+            ctx.restore();
+        }
+
+        // ============================================================================
+        // HUD TELEMETRY & MODAL CONTROLLERS
+        // ============================================================================
+        function updateTelemetryHUD(sorted, player) {
+            const phaseLabel = document.getElementById('racePhaseLabel');
+            const timerEl = document.getElementById('raceTimerDisplay');
+
+            if (gameState.phase === 'PRESTART') {
+                phaseLabel.textContent = 'PRE-START SEQUENCE';
+                phaseLabel.className = 'text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-amber-400';
+                const secs = Math.max(0, gameState.timer);
+                const m = Math.floor(secs / 60);
+                const s = (secs % 60).toFixed(1).padStart(4, '0');
+                timerEl.textContent = `${m}:${s}`;
+            } else if (gameState.phase === 'RACING') {
+                phaseLabel.textContent = 'RACE IN PROGRESS';
+                phaseLabel.className = 'text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-emerald-400';
+                const secs = gameState.timer;
+                const m = Math.floor(secs / 60);
+                const s = (secs % 60).toFixed(1).padStart(4, '0');
+                timerEl.textContent = `${m}:${s}`;
+            } else {
+                phaseLabel.textContent = 'RACE COMPLETE';
+                phaseLabel.className = 'text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-sky-400';
+            }
+
+            if (player) {
+                const legNames = [
+                    'Start Line',
+                    'Mark 1 (Stbd)',
+                    'Mark 2 (Stbd)',
+                    'Mark 3 (Port)',
+                    'Mark 4 (Port)',
+                    'Finish Line',
+                    'Finished!'
+                ];
+                document.getElementById('nextMarkDisplay').innerHTML =
+                    `<i class="fa-solid fa-location-arrow text-xs"></i><span>${legNames[Math.min(6, player.leg)]}</span>`;
+
+                document.getElementById('hudSpeed').textContent = player.speed.toFixed(1);
+                document.getElementById('hudTWA').textContent = `${Math.round(player.twa)}°`;
+
+                const tackBadge = document.getElementById('hudTackBadge');
+                if (player.tack === 'STBD') {
+                    tackBadge.textContent = 'STBD';
+                    tackBadge.className = 'px-1.5 py-0.5 text-[9px] sm:text-[10px] font-extrabold rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+                } else {
+                    tackBadge.textContent = 'PORT';
+                    tackBadge.className = 'px-1.5 py-0.5 text-[9px] sm:text-[10px] font-extrabold rounded bg-rose-500/20 text-rose-300 border border-rose-500/40';
+                }
+
+                const pointEl = document.getElementById('hudPointMode');
+                if (player.ocs) {
+                    pointEl.textContent = 'OCS - DIP START LINE!';
+                    pointEl.className = 'text-[10px] sm:text-[11px] font-extrabold text-rose-400 animate-pulse';
+                } else if (player.inIrons) {
+                    pointEl.textContent = 'IN IRONS (Stalled)';
+                    pointEl.className = 'text-[10px] sm:text-[11px] font-bold text-rose-400';
+                } else if (player.luffing) {
+                    pointEl.textContent = 'Luffing / Backwinding Cover';
+                    pointEl.className = 'text-[10px] sm:text-[11px] font-bold text-emerald-300';
+                } else {
+                    pointEl.textContent = player.pointState;
+                    pointEl.className = 'text-[10px] sm:text-[11px] font-bold text-emerald-400';
+                }
+
+                const airEl = document.getElementById('hudClearAir');
+                const shadowPct = Math.round(player.shadowFactor * 100);
+                if (player.leeBowedBy) {
+                    airEl.textContent = `Lee-Bowed by ${player.leeBowedBy}!`;
+                    airEl.className = 'text-[10px] sm:text-[11px] font-bold text-orange-400';
+                } else if (shadowPct > 8) {
+                    airEl.textContent = `Dirty Air (-${shadowPct}% Speed)`;
+                    airEl.className = 'text-[10px] sm:text-[11px] font-bold text-rose-400';
+                } else {
+                    airEl.textContent = 'Clear Air (100%)';
+                    airEl.className = 'text-[10px] sm:text-[11px] font-semibold text-slate-300';
+                }
+
+                const localWind = getWindAt(player.x, player.y);
+                document.getElementById('hudWindSpeed').textContent = `${localWind.speed.toFixed(1)} kts`;
+                const shiftDeg = Math.round(localWind.shift);
+                const shiftEl = document.getElementById('hudShiftIndicator');
+                if (Math.abs(shiftDeg) <= 1) {
+                    shiftEl.textContent = `Steady (0° Shift)${localWind.puffLabel ? ' • ' + localWind.puffLabel : ''}`;
+                    shiftEl.className = 'text-[10px] sm:text-[11px] font-semibold text-slate-300';
+                } else {
+                    const isLift = (player.tack === 'STBD' && shiftDeg > 0) || (player.tack === 'PORT' && shiftDeg < 0);
+                    shiftEl.textContent = `${isLift ? 'LIFT' : 'HEADER'} (${shiftDeg > 0 ? '+' : ''}${shiftDeg}°)${localWind.puffLabel ? ' • ' + localWind.puffLabel : ''}`;
+                    shiftEl.className = `text-[10px] sm:text-[11px] font-bold ${isLift ? 'text-emerald-400' : 'text-rose-400'}`;
+                }
+
+                const penBox = document.getElementById('hudPenaltyBox');
+                const penText = document.getElementById('hudPenaltyText');
+                if (player.penalties > 0) {
+                    penBox.classList.remove('hidden');
+                    if (player.spinning) {
+                        const totalDeg = config.penaltyTurnsRequired * 360;
+                        penText.textContent = `Spinning: ${Math.min(totalDeg, Math.round(player.spinProgress))}° / ${totalDeg}°`;
+                    } else {
+                        penText.textContent = `${player.penalties} Pen (${config.penaltyTurnsRequired * 360}°) - Press 'P'`;
+                    }
+                } else {
+                    penBox.classList.add('hidden');
+                }
+            }
+
+            let bluePts = 0;
+            let redPts = 0;
+            const blueRanks = [];
+            const redRanks = [];
+            const pillsHTML = [];
+
+            sorted.forEach((b, idx) => {
+                const rank = idx + 1;
+                if (b.team === 'BLUE') {
+                    bluePts += rank;
+                    blueRanks.push(rank);
+                } else {
+                    redPts += rank;
+                    redRanks.push(rank);
+                }
+                const bg = b.team === 'BLUE'
+                    ? 'bg-blue-600/80 border-blue-400 text-white'
+                    : 'bg-rose-600/80 border-rose-400 text-white';
+                const penDot = b.penalties > 0 ? '⚠️' : (b.ocs ? '🚩' : '');
+                pillsHTML.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold mono border ${bg}">${rank}:${b.id}${penDot}</span>`);
+            });
+
+            document.getElementById('bluePointsDisplay').textContent = `${bluePts} pts`;
+            document.getElementById('redPointsDisplay').textContent = `${redPts} pts`;
+            document.getElementById('orderPillsContainer').innerHTML = pillsHTML.join('');
+
+            const comboBadge = document.getElementById('comboStatusBadge');
+            const bluePlayCode = gameState.activePlays.BLUE.code;
+            if (bluePts <= 10) {
+                comboBadge.textContent = `BLUE WINNING (${blueRanks.join('-')}) • ${bluePlayCode}`;
+                comboBadge.className = 'px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[10px] sm:text-xs font-extrabold uppercase tracking-wider bg-blue-500/25 text-blue-300 border border-blue-400/50';
+            } else {
+                comboBadge.textContent = `RED WINNING (${redRanks.join('-')}) • ${bluePlayCode}`;
+                comboBadge.className = 'px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[10px] sm:text-xs font-extrabold uppercase tracking-wider bg-rose-500/25 text-rose-300 border border-rose-400/50';
+            }
+        }
+
+        function showFinishModal(sorted) {
+            const modal = document.getElementById('finishModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            let blueScore = 0;
+            let redScore = 0;
+            const bluePlaces = [];
+            const redPlaces = [];
+
+            const rows = sorted.map((b, i) => {
+                const place = i + 1;
+                if (b.team === 'BLUE') {
+                    blueScore += place;
+                    bluePlaces.push(place);
+                } else {
+                    redScore += place;
+                    redPlaces.push(place);
+                }
+                const colorBadge = b.team === 'BLUE' ? 'text-blue-400' : 'text-rose-400';
+                return `
+                    <div class="flex items-center justify-between py-1.5 border-b border-slate-800/80 last:border-0">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center font-extrabold mono text-white">${place}</span>
+                            <span class="font-extrabold ${colorBadge}">${b.id} (${b.team})</span>
+                            ${b.isPlayer ? '<span class="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] font-bold">YOU</span>' : ''}
+                        </div>
+                        <span class="mono text-slate-400 font-semibold">${place} pt${place > 1 ? 's' : ''}</span>
+                    </div>
+                `;
+            });
+
+            document.getElementById('finishOrderTable').innerHTML = rows.join('');
+
+            const titleEl = document.getElementById('finishTitle');
+            const subEl = document.getElementById('finishSubtitle');
+            if (blueScore <= 10) {
+                titleEl.textContent = 'BLUE TEAM WINS!';
+                titleEl.className = 'text-3xl font-extrabold text-blue-400';
+                subEl.textContent = `Winning Combo: ${bluePlaces.join('-')} (${blueScore} pts vs Red ${redScore} pts)`;
+            } else {
+                titleEl.textContent = 'RED TEAM WINS!';
+                titleEl.className = 'text-3xl font-extrabold text-rose-400';
+                subEl.textContent = `Red Combo: ${redPlaces.join('-')} (${redScore} pts vs Blue ${blueScore} pts)`;
+            }
+        }
+
+        function startNewRegatta() {
+            config.startLengthSec = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
+            config.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
+            config.windMode = document.getElementById('selectWindMode').value || 'shifty';
+
+            const degLabel = config.penaltyTurnsRequired === 1 ? '360°' : '720°';
+            document.getElementById('penaltyConfigBadge').textContent =
+                `Rule: ${config.penaltyTurnsRequired}-Turn (${degLabel})`;
+            document.getElementById('btnPenaltyLabel').textContent = `Spin ${degLabel}`;
+
+            gameState.phase = 'PRESTART';
+            gameState.timer = config.startLengthSec;
+            gameState.finishOrder = [];
+            gameState.radioLogs = [];
+            document.getElementById('tacticalFeed').innerHTML = '';
+
+            initWindField();
+
+            gameState.boats = [
+                new Boat('B1', 'BLUE', true,  600, 2240, -45),
+                new Boat('B2', 'BLUE', false, 735, 2265, -45),
+                new Boat('B3', 'BLUE', false, 885, 2250, -45),
+                new Boat('R1', 'RED',  false, 665, 2255, -45),
+                new Boat('R2', 'RED',  false, 810, 2270, -45),
+                new Boat('R3', 'RED',  false, 945, 2260, -45)
+            ];
+
+            gameState.camera.x = 720;
+            gameState.camera.y = 2120;
+            gameState.camera.zoom = config.userZoom;
+
+            document.getElementById('startModal').classList.add('hidden');
+            document.getElementById('finishModal').classList.add('hidden');
+            document.getElementById('finishModal').classList.remove('flex');
+
+            logRadio('RC', 'BLUE', `Pre-start (${config.startLengthSec}s). B1 Pin, B2 Mid, B3 Boat!`);
+            showToast(`Pre-Start Sequence Started (${config.startLengthSec}s)`);
+
+            gameState.running = true;
+            gameState.lastTime = performance.now();
+        }
+
+        function setZoom(newZoom) {
+            config.userZoom = Math.max(0.28, Math.min(1.65, newZoom));
+            if (!config.cameraFollow) {
+                config.cameraFollow = true;
+                document.getElementById('camModeText').textContent = 'Cam: Follow (Z)';
+            }
+        }
+
+        // Scroll Wheel & Trackpad Zoom
+        window.addEventListener('wheel', (e) => {
+            if (!document.getElementById('startModal').classList.contains('hidden')) return;
+            e.preventDefault();
+            const zoomDelta = e.deltaY * -0.0012;
+            setZoom(config.userZoom + zoomDelta);
+        }, { passive: false });
+
+        document.getElementById('zoomInBtn').addEventListener('click', () => setZoom(config.userZoom + 0.12));
+        document.getElementById('zoomOutBtn').addEventListener('click', () => setZoom(config.userZoom - 0.12));
+
+        // Keyboard Listeners
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (e.key === 'Shift') {
+                inputState.luff = true;
+                document.getElementById('btnLuff').classList.add('active-press');
+            }
+            if (key === 'w' || e.key === 'ArrowUp') {
+                inputState.headUp = true;
+                document.getElementById('btnHeadUp').classList.add('active-press');
+            }
+            if (key === 's' || e.key === 'ArrowDown') {
+                inputState.headDown = true;
+                document.getElementById('btnHeadDown').classList.add('active-press');
+            }
+            if (key === 't') {
+                const player = gameState.boats.find(b => b.isPlayer);
+                if (player) player.triggerTack();
+                document.getElementById('btnTack').classList.add('active-press');
+            }
+            if (key === 'g') {
+                const player = gameState.boats.find(b => b.isPlayer);
+                if (player) player.triggerGybe();
+                document.getElementById('btnGybe').classList.add('active-press');
+            }
+            if (key === 'p') {
+                const player = gameState.boats.find(b => b.isPlayer);
+                if (player) player.triggerPenaltySpin();
+                document.getElementById('btnPenalty').classList.add('active-press');
+            }
+            if (key === 'z' || key === 'c') {
+                document.getElementById('toggleCameraBtn').click();
+            }
+            if (e.key === '-' || e.key === '_') setZoom(config.userZoom - 0.1);
+            if (e.key === '=' || e.key === '+') setZoom(config.userZoom + 0.1);
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (e.key === 'Shift') {
+                inputState.luff = false;
+                document.getElementById('btnLuff').classList.remove('active-press');
+            }
+            if (key === 'w' || e.key === 'ArrowUp') {
+                inputState.headUp = false;
+                document.getElementById('btnHeadUp').classList.remove('active-press');
+            }
+            if (key === 's' || e.key === 'ArrowDown') {
+                inputState.headDown = false;
+                document.getElementById('btnHeadDown').classList.remove('active-press');
+            }
+            if (key === 't') document.getElementById('btnTack').classList.remove('active-press');
+            if (key === 'g') document.getElementById('btnGybe').classList.remove('active-press');
+            if (key === 'p') document.getElementById('btnPenalty').classList.remove('active-press');
+        });
+
+        function bindHoldButton(btnId, stateKey) {
+            const btn = document.getElementById(btnId);
+            const startHold = (e) => { e.preventDefault(); inputState[stateKey] = true; btn.classList.add('active-press'); };
+            const endHold = (e) => { e.preventDefault(); inputState[stateKey] = false; btn.classList.remove('active-press'); };
+            btn.addEventListener('mousedown', startHold);
+            btn.addEventListener('mouseup', endHold);
+            btn.addEventListener('mouseleave', endHold);
+            btn.addEventListener('touchstart', startHold, { passive: false });
+            btn.addEventListener('touchend', endHold, { passive: false });
+        }
+
+        bindHoldButton('btnHeadUp', 'headUp');
+        bindHoldButton('btnHeadDown', 'headDown');
+        bindHoldButton('btnLuff', 'luff');
+
+        document.getElementById('btnTack').addEventListener('click', () => {
+            const player = gameState.boats.find(b => b.isPlayer);
+            if (player) player.triggerTack();
+        });
+        document.getElementById('btnGybe').addEventListener('click', () => {
+            const player = gameState.boats.find(b => b.isPlayer);
+            if (player) player.triggerGybe();
+        });
+        document.getElementById('btnPenalty').addEventListener('click', () => {
+            const player = gameState.boats.find(b => b.isPlayer);
+            if (player) player.triggerPenaltySpin();
+        });
+
+        document.getElementById('toggleCameraBtn').addEventListener('click', () => {
+            config.cameraFollow = !config.cameraFollow;
+            document.getElementById('camModeText').textContent = config.cameraFollow ? 'Cam: Follow (Z)' : 'Cam: Course (Z)';
+        });
+
+        document.getElementById('toggleOverlaysBtn').addEventListener('click', (e) => {
+            config.showOverlays = !config.showOverlays;
+            e.currentTarget.querySelector('span').textContent = config.showOverlays ? 'Shadows: ON' : 'Shadows: OFF';
+        });
+
+        document.getElementById('openSetupBtn').addEventListener('click', () => {
+            gameState.running = false;
+            const finModal = document.getElementById('finishModal');
+            finModal.classList.add('hidden');
+            finModal.classList.remove('flex');
+            const startModal = document.getElementById('startModal');
+            startModal.classList.remove('hidden');
+            startModal.classList.add('flex');
+        });
+
+        document.getElementById('startRaceBtn').addEventListener('click', startNewRegatta);
+        document.getElementById('playAgainBtn').addEventListener('click', startNewRegatta);
+        document.getElementById('changeSettingsBtn').addEventListener('click', () => {
+            gameState.running = false;
+            const finModal = document.getElementById('finishModal');
+            finModal.classList.add('hidden');
+            finModal.classList.remove('flex');
+            const startModal = document.getElementById('startModal');
+            startModal.classList.remove('hidden');
+            startModal.classList.add('flex');
+        });
+
+        // Main Animation Loop
+        function gameLoop(now) {
+            const dt = Math.min(0.05, (now - gameState.lastTime) / 1000);
+            gameState.lastTime = now;
+
+            if (gameState.running) {
+                updateSimulation(dt);
+            }
+            renderScene();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize immediately
+        initWindField();
+        gameState.boats = [
+            new Boat('B1', 'BLUE', true,  600, 2240, -45),
+            new Boat('B2', 'BLUE', false, 735, 2265, -45),
+            new Boat('B3', 'BLUE', false, 885, 2250, -45),
+            new Boat('R1', 'RED',  false, 665, 2255, -45),
+            new Boat('R2', 'RED',  false, 810, 2270, -45),
+            new Boat('R3', 'RED',  false, 945, 2260, -45)
+        ];
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
