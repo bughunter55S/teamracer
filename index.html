@@ -217,12 +217,12 @@
                         <i class="fa-solid fa-sailboat"></i> 3v3 Collegiate & High School Format
                     </div>
                     <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">C420 Team Racing Simulator</h1>
-                    <p class="text-xs sm:text-sm text-slate-400">Digital N Course • Play 1–4 AI • Visible Puffs, Dirty Air & 3v3 Party Lobby</p>
+                    <p class="text-xs sm:text-sm text-slate-400">Digital N Course • Play 1–4 AI • Visible Puffs, Dirty Air & Cross-Device 3v3 Party Lobby</p>
                 </div>
                 <div class="text-right">
                     <div class="text-xs font-bold text-slate-400 uppercase">You Helm</div>
                     <div id="selectedBoatHeaderBadge" class="text-lg font-extrabold text-blue-400 mono">BLUE (B1)</div>
-                    <div id="mpUserIdDisplay" class="text-[10px] text-emerald-400 mono">Party Sync Ready</div>
+                    <div id="mpUserIdDisplay" class="text-[10px] text-emerald-400 mono">Connecting Global Relay...</div>
                 </div>
             </div>
 
@@ -232,7 +232,7 @@
                     <div class="flex items-center gap-2">
                         <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" id="mpStatusDot"></span>
                         <span class="text-xs font-extrabold uppercase tracking-wider text-sky-300">
-                            <i class="fa-solid fa-users mr-1"></i> 3v3 Multiplayer Party System
+                            <i class="fa-solid fa-users mr-1"></i> Cross-Device 3v3 Party System
                         </span>
                         <span id="mpCurrentRoomBadge" class="hidden px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40 text-sky-300 font-bold mono text-xs"></span>
                     </div>
@@ -246,7 +246,7 @@
                 <div id="mpLobbyBrowser" class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <!-- Create or Join by Code -->
                     <div class="bg-slate-950/70 p-3 rounded-lg border border-slate-800 space-y-2.5">
-                        <div class="text-[11px] font-extrabold uppercase text-slate-300">Host or Join Party</div>
+                        <div class="text-[11px] font-extrabold uppercase text-slate-300">Host or Join Party Across Any Device</div>
                         <div class="flex flex-wrap items-center gap-2">
                             <button id="createPublicPartyBtn" class="btn-game flex-1 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5">
                                 <i class="fa-solid fa-earth-americas"></i> Host Public Party
@@ -285,6 +285,7 @@
                             <button id="copyPartyCodeBtn" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-sky-300 border border-slate-700 font-semibold">
                                 <i class="fa-regular fa-copy mr-1"></i>Copy
                             </button>
+                            <span id="partySyncBadge" class="text-[10px] mono font-bold text-emerald-400 ml-1">● Live Sync</span>
                         </div>
                         <div class="flex items-center gap-3">
                             <label class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-200 cursor-pointer">
@@ -445,6 +446,7 @@
             isHost: false,
             partyData: null,
             remotePlayers: {},
+            hostRaceState: null,
             lastSyncSent: 0
         };
 
@@ -521,11 +523,21 @@
             }).join('');
         }
 
+        // Deterministic PRNG helper so Host & Guests generate identical wind puffs when given a seed
+        function createSeededRandom(seed) {
+            let s = (seed >>> 0) || 123456789;
+            return function() {
+                s = (s * 1664525 + 1013904223) >>> 0;
+                return s / 4294967296;
+            };
+        }
+
         // Wind & Cat's-Paw Puff Field
-        function initWindField() {
+        function initWindField(seedVal) {
+            const rand = createSeededRandom(seedVal || Date.now());
             gameState.puffs = [];
             gameState.waves = [];
-            gameState.windOscPhase = Math.random() * Math.PI * 2;
+            gameState.windOscPhase = rand() * Math.PI * 2;
 
             if (config.windMode === 'planing') {
                 gameState.baseWindSpeed = 17.5;
@@ -539,24 +551,24 @@
             for (let i = 0; i < puffCount; i++) {
                 const isLull = (i % 4 === 3);
                 gameState.puffs.push({
-                    x: 350 + Math.random() * 2700,
-                    y: 250 + Math.random() * 2100,
-                    rx: 150 + Math.random() * 130,
-                    ry: 190 + Math.random() * 160,
+                    x: 350 + rand() * 2700,
+                    y: 250 + rand() * 2100,
+                    rx: 150 + rand() * 130,
+                    ry: 190 + rand() * 160,
                     deltaSpeed: isLull
-                        ? -(2.5 + Math.random() * 2.0)
-                        : (2.8 + Math.random() * (config.windMode === 'puffy' ? 4.5 : 3.0)),
-                    shiftDeg: (Math.random() - 0.5) * (config.windMode === 'shifty' ? 16 : 11),
+                        ? -(2.5 + rand() * 2.0)
+                        : (2.8 + rand() * (config.windMode === 'puffy' ? 4.5 : 3.0)),
+                    shiftDeg: (rand() - 0.5) * (config.windMode === 'shifty' ? 16 : 11),
                     isLull
                 });
             }
 
             for (let i = 0; i < 160; i++) {
                 gameState.waves.push({
-                    x: Math.random() * WORLD_WIDTH,
-                    y: Math.random() * WORLD_HEIGHT,
-                    len: 18 + Math.random() * 22,
-                    phase: Math.random() * Math.PI * 2
+                    x: rand() * WORLD_WIDTH,
+                    y: rand() * WORLD_HEIGHT,
+                    len: 18 + rand() * 22,
+                    phase: rand() * Math.PI * 2
                 });
             }
         }
@@ -607,28 +619,22 @@
         function getC420PolarSpeed(absTwa, windSpeed) {
             let factor = 0;
             if (absTwa < 27) {
-                // In irons / stalled
                 factor = (absTwa / 27) * 0.12;
             } else if (absTwa < 42) {
-                // Pinching to optimal close-hauled (42 deg)
                 const t = (absTwa - 27) / (42 - 27);
                 factor = 0.12 + Math.pow(t, 0.78) * 0.42;
             } else if (absTwa < 55) {
-                // Footing off from close-hauled
                 const t = (absTwa - 42) / (55 - 42);
                 factor = 0.54 + t * 0.08;
             } else if (absTwa < 95) {
-                // Close to Beam Reach (C420 planes in breeze!)
                 const t = (absTwa - 55) / (95 - 55);
                 const planingBoost = windSpeed > 14 ? 0.12 : 0.04;
                 factor = 0.62 + Math.sin(t * Math.PI * 0.65) * (0.14 + planingBoost);
             } else if (absTwa < 145) {
-                // Broad Reach (fastest point of sail)
                 const t = (absTwa - 95) / (145 - 95);
                 const planingBoost = windSpeed > 14 ? 0.14 : 0.05;
                 factor = 0.76 + planingBoost - t * 0.10;
             } else {
-                // Running dead downwind
                 const t = (absTwa - 145) / (180 - 145);
                 factor = 0.64 - t * 0.07;
             }
@@ -720,41 +726,35 @@
                     const laneX = slotIdx >= 0
                         ? COURSE.startPin.x + 70 + slotIdx * 72
                         : (COURSE.startPin.x + COURSE.startRC.x) * 0.5;
-                    // Only dip back below the line if this specific boat is flagged OCS or missed the Pin/RC ends!
                     if (this.ocs || (this.y < COURSE.startPin.y && (this.x < COURSE.startPin.x - 10 || this.x > COURSE.startRC.x + 10))) {
                         return { x: laneX, y: COURSE.startPin.y + 42 };
                     }
                     return { x: laneX, y: COURSE.startPin.y - 65 };
                 }
                 if (this.leg === 1) {
-                    // M1 (Leave to Starboard: approach on left/west, round over top)
                     if (this.y > COURSE.mark1.y + 42) {
                         return { x: COURSE.mark1.x - 42, y: COURSE.mark1.y - 10 };
                     }
                     return { x: COURSE.mark1.x + 48, y: COURSE.mark1.y - 38 };
                 }
                 if (this.leg === 2) {
-                    // M2 (Leave to Starboard: approach over top, turn south on east side)
                     if (this.x < COURSE.mark2.x + 15) {
                         return { x: COURSE.mark2.x + 38, y: COURSE.mark2.y - 36 };
                     }
                     return { x: COURSE.mark2.x + 44, y: COURSE.mark2.y + 52 };
                 }
                 if (this.leg === 3) {
-                    // M3 (Leave to Port: approach on west side, turn east under bottom)
                     if (this.y < COURSE.mark3.y - 12) {
                         return { x: COURSE.mark3.x - 42, y: COURSE.mark3.y + 34 };
                     }
                     return { x: COURSE.mark3.x + 48, y: COURSE.mark3.y + 44 };
                 }
                 if (this.leg === 4) {
-                    // M4 (Leave to Port: approach under bottom, round up on east side)
                     if (this.x < COURSE.mark4.x + 12) {
                         return { x: COURSE.mark4.x + 42, y: COURSE.mark4.y + 40 };
                     }
                     return { x: COURSE.mark4.x + 42, y: COURSE.mark4.y - 50 };
                 }
-                // Leg 5: Finish Line center
                 return {
                     x: (COURSE.finishPin.x + COURSE.finishRC.x) * 0.5,
                     y: COURSE.finishPin.y - 30
@@ -768,14 +768,14 @@
                 if (this.foulCooldown > 0) this.foulCooldown -= dt;
                 if (this.aiTackCooldown > 0) this.aiTackCooldown -= dt;
 
-                // Remote human boats are driven by network/party interpolation
+                // Remote human or host-synced boats are driven by network interpolation
                 if (this.isRemoteHuman && !this.isPlayer) {
                     const rem = mpState.remotePlayers[this.id];
                     if (rem) {
-                        this.x += (rem.x - this.x) * Math.min(1, dt * 10);
-                        this.y += (rem.y - this.y) * Math.min(1, dt * 10);
+                        this.x += (rem.x - this.x) * Math.min(1, dt * 11);
+                        this.y += (rem.y - this.y) * Math.min(1, dt * 11);
                         const hDiff = angleDiff(rem.heading || 0, this.heading);
-                        this.heading = wrapAngle180(this.heading + hDiff * Math.min(1, dt * 12));
+                        this.heading = wrapAngle180(this.heading + hDiff * Math.min(1, dt * 13));
                         this.speed = rem.speed ?? this.speed;
                         this.tack = rem.tack || this.tack;
                         this.twa = rem.twa ?? this.twa;
@@ -786,7 +786,8 @@
                         this.finished = !!rem.finished;
                         this.finishTime = rem.finishTime ?? this.finishTime;
                         this.ocs = !!rem.ocs;
-                        this.roleBadge = rem.skipperName ? `👤 ${rem.skipperName}` : 'PLAYER';
+                        this.skipperName = rem.skipperName || this.skipperName;
+                        this.roleBadge = rem.skipperName ? `👤 ${rem.skipperName}` : (rem.uid === 'HOST_BOT' ? 'AI BOT' : 'PLAYER');
                     }
                     if (Math.random() < 0.45) {
                         this.wake.push({ x: this.x, y: this.y, alpha: 0.55 });
@@ -810,7 +811,7 @@
 
                 // Handle Exoneration Penalty Spin (360 or 720)
                 if (this.spinning) {
-                    const spinRate = 155; // deg per second
+                    const spinRate = 155;
                     const step = spinRate * dt;
                     this.heading = wrapAngle180(this.heading + this.spinDir * step);
                     this.spinAccumDeg += step;
@@ -829,46 +830,29 @@
                     this.updateBotAI(dt, localWind, effWindDir, rankMap);
                 }
 
-                // Compute Tack & True Wind Angle (TWA)
-                // signedTwa = wrapAngle180(heading - effWindDir):
-                // Negative (-1.. -179) => Wind from Starboard side => STBD tack
-                // Positive (+1.. +179) => Wind from Port side => PORT tack
                 this.signedTwa = wrapAngle180(this.heading - effWindDir);
                 this.twa = Math.abs(this.signedTwa);
                 this.tack = this.signedTwa <= 0 ? 'STBD' : 'PORT';
 
-                // Compute Target Boat Speed from Polar Curve + Dirty Air + Luffing
                 const effWindSpeed = localWind.speed * (1 - this.shadowFactor * 0.42);
                 let targetSpeed = getC420PolarSpeed(this.twa, effWindSpeed);
 
-                if (this.luffing) {
-                    targetSpeed *= 0.34;
-                }
-                if (this.spinning) {
-                    targetSpeed *= 0.48;
-                }
-                if (this.leeBowedBy) {
-                    targetSpeed *= 0.72;
-                }
-                if (this.penalties > 0 && !this.spinning) {
-                    // Carrying an unexonerated foul penalty slows you down until you press [P] to spin!
-                    targetSpeed *= 0.75;
-                }
+                if (this.luffing) targetSpeed *= 0.34;
+                if (this.spinning) targetSpeed *= 0.48;
+                if (this.leeBowedBy) targetSpeed *= 0.72;
+                if (this.penalties > 0 && !this.spinning) targetSpeed *= 0.75;
 
                 const accelRate = targetSpeed > this.speed ? 2.2 : 2.8;
                 this.speed += (targetSpeed - this.speed) * Math.min(1, dt * accelRate);
 
-                // Move Boat
                 const rad = degToRad(this.heading);
                 const pxPerKnot = 14.2;
                 this.x += Math.sin(rad) * this.speed * pxPerKnot * dt;
                 this.y -= Math.cos(rad) * this.speed * pxPerKnot * dt;
 
-                // Keep within world bounds
                 this.x = Math.max(80, Math.min(WORLD_WIDTH - 80, this.x));
                 this.y = Math.max(80, Math.min(WORLD_HEIGHT - 80, this.y));
 
-                // Wake Trail
                 if (Math.random() < 0.55) {
                     this.wake.push({ x: this.x, y: this.y, alpha: 0.6 });
                     if (this.wake.length > 28) this.wake.shift();
@@ -882,20 +866,17 @@
                 this.luffing = keys.luff;
                 this.roleBadge = this.skipperName ? `👤 ${this.skipperName}` : 'YOU (HELM)';
 
-                const turnSpeed = 68; // deg/sec
+                const turnSpeed = 68;
 
                 if (keys.up || keys.down) {
-                    // Manual W/S steering cancels auto-tack target
                     this.targetHeading = null;
                     const rel = wrapAngle180(this.heading - effWindDir);
                     const sign = rel === 0 ? (this.tack === 'STBD' ? -1 : 1) : Math.sign(rel);
 
                     if (keys.up) {
-                        // W = Head Up TOWARD the eye of the wind (reduce |TWA|)
                         this.heading = wrapAngle180(this.heading - sign * turnSpeed * dt);
                     }
                     if (keys.down) {
-                        // S = Bear Away FROM the eye of the wind (increase |TWA|)
                         this.heading = wrapAngle180(this.heading + sign * turnSpeed * dt);
                     }
                 } else if (this.targetHeading !== null) {
@@ -914,30 +895,25 @@
                 this.luffing = false;
                 this.roleBadge = '';
 
-                // 1. Exonerate penalties when clear
                 if (this.penalties > 0 && gameState.phase === 'RACING' && !this.inZone) {
                     this.roleBadge = 'EXONERATING';
                     this.triggerPenaltySpin();
                     return;
                 }
 
-                // 2. Pre-Start Line Jockeying (Geographic Start & Hooking/Lead-Chase)
                 if (gameState.phase === 'PRESTART') {
                     const slotIdx = ['B1', 'R1', 'B2', 'R2', 'B3', 'R3'].indexOf(this.id);
                     const targetX = COURSE.startPin.x + 75 + slotIdx * 72;
                     const lineY = COURSE.startPin.y;
 
                     if (gameState.timer > 11) {
-                        // Sail in the safe holding zone below the line
                         const holdY = lineY + 115 + (slotIdx % 2) * 35;
                         const desiredDir = radToDeg(Math.atan2(targetX - this.x, -(holdY - this.y)));
                         this.steerWithLaylines(desiredDir, effWindDir, dt, false);
                         this.roleBadge = 'PRE-START HOLD';
                     } else {
-                        // Final approach to hit the line at full speed on Starboard tack without going OCS
                         const safeTargetY = lineY + 16;
                         if (this.y < lineY + 8) {
-                            // Too close to or above the line before the gun -> bear away below line!
                             const dipDir = radToDeg(Math.atan2(targetX - this.x, -((lineY + 38) - this.y)));
                             this.steerDirectly(dipDir, dt, 85);
                             this.roleBadge = 'STAYING BELOW LINE';
@@ -946,7 +922,6 @@
                             const closeHauledStbd = wrapAngle180(effWindDir - 42);
                             this.steerDirectly(closeHauledStbd, dt, 72);
                             if (distToLine < 26 && gameState.timer > 1.8) {
-                                // Luff sails to hold tight-to-leeward below the line without drifting OCS!
                                 this.luffing = true;
                                 this.roleBadge = 'HOLDING ON LINE';
                             } else {
@@ -958,7 +933,6 @@
                     return;
                 }
 
-                // 3. OCS Dip Back (ONLY for the individual boat that is flagged this.ocs!)
                 if (this.ocs) {
                     this.roleBadge = 'DIPPING OCS';
                     const slotIdx = ['B1', 'R1', 'B2', 'R2', 'B3', 'R3'].indexOf(this.id);
@@ -969,13 +943,11 @@
                     return;
                 }
 
-                // 3b. Must physically cross between Start Pin and Start RC before starting Leg 1
                 if (this.leg === 0) {
                     this.roleBadge = 'CROSSING START LINE';
                     const startWp = this.getWaypointForCurrentLeg();
                     const dirToStart = radToDeg(Math.atan2(startWp.x - this.x, -(startWp.y - this.y)));
                     if (this.y < COURSE.startPin.y && (this.x < COURSE.startPin.x - 10 || this.x > COURSE.startRC.x + 10)) {
-                        // Sailed above the line outside the Pin/RC ends -> bear away below line first
                         this.steerDirectly(dirToStart, dt, 80);
                     } else {
                         this.steerWithLaylines(dirToStart, effWindDir, dt, false);
@@ -984,7 +956,6 @@
                     return;
                 }
 
-                // 4. Evaluate 2008 Handbook Team Racing Playbook
                 const myRank = rankMap.get(this.id) || 3;
                 const teammates = gameState.boats.filter(b => b.activeInRace && b.team === this.team && !b.finished);
                 const opponents = gameState.boats.filter(b => b.activeInRace && b.team !== this.team && !b.finished);
@@ -998,7 +969,6 @@
                 const wp = this.getWaypointForCurrentLeg();
                 let desiredCourse = radToDeg(Math.atan2(wp.x - this.x, -(wp.y - this.y)));
 
-                // Find nearest opponent behind and ahead on same leg
                 const oppBehind = opponents
                     .filter(o => (rankMap.get(o.id) || 6) > myRank && distBetween(this, o) < 340)
                     .sort((a, b) => distBetween(this, a) - distBetween(this, b))[0];
@@ -1007,26 +977,21 @@
                     .filter(m => m !== this && (rankMap.get(m.id) || 6) > myRank && distBetween(this, m) < 420)
                     .sort((a, b) => (rankMap.get(a.id) || 6) - (rankMap.get(b.id) || 6))[0];
 
-                // PLAY 1: 1, 2, Anything (or Play 3: 1, 2, 3)
                 if (p1 === 1 && p2 === 2) {
                     if (myRank <= 2) {
                         this.roleBadge = 'PLAY 1: FAST COVER';
-                        // Loose cover nearest opponent if upwind
                         if ((this.leg === 1 || this.leg === 5) && oppBehind && Math.abs(this.x - oppBehind.x) > 130 && this.aiTackCooldown <= 0) {
                             if ((oppBehind.x > this.x && this.tack === 'STBD') || (oppBehind.x < this.x && this.tack === 'PORT')) {
                                 if (this.canSafelyTack()) this.triggerTack();
                             }
                         }
                     } else if (myRank === 3 && this.leg === 2 && oppBehind && distBetween(this, oppBehind) < 170) {
-                        // Play 3 Handbook Rule: 3 slows 4-5-6 at top reach (Mark 2) so 1-2 break away
                         this.roleBadge = 'PLAY 3: SLOW PACK';
                         this.luffing = true;
                     } else {
                         this.roleBadge = 'PLAY 1: STAY <=5TH';
                     }
-                }
-                // PLAY 2: 2, 3, 4 Pyramid Umbrella & M4 Weave
-                else if (p1 === 2 && p2 === 3 && p3 === 4) {
+                } else if (p1 === 2 && p2 === 3 && p3 === 4) {
                     if (myRank === 2) {
                         this.roleBadge = 'PLAY 2: POINT MID';
                     } else if (myRank === 3) {
@@ -1035,13 +1000,10 @@
                         this.roleBadge = 'PLAY 2: RIGHT WING';
                     }
                     if ((this.leg === 1 || this.leg === 5) && oppBehind && distBetween(this, oppBehind) < 160) {
-                        // Balance / blanket opponent in covering zone
                         this.roleBadge = 'PLAY 2: UMBRELLA';
                         if (distBetween(this, oppBehind) < 95) this.luffing = true;
                     }
-                }
-                // PLAY 4: 1, 4, 5 (1 stays close, 4 pushes 2-3, 5 gaps 6)
-                else if (p1 === 1 && p2 === 4 && p3 === 5) {
+                } else if (p1 === 1 && p2 === 4 && p3 === 5) {
                     if (myRank === 1) {
                         this.roleBadge = 'PLAY 4: CONTROL #1';
                     } else if (myRank === 4) {
@@ -1050,19 +1012,15 @@
                         this.roleBadge = 'PLAY 4: GAP THE #6';
                         if (distBetween(this, oppBehind) < 120) this.luffing = true;
                     }
-                }
-                // LOSING OR CONVERTING: Execute Passback / Mark Trap / High-Low
-                else if (!isWinning && oppBehind && mateBehind && (rankMap.get(mateBehind.id) - rankMap.get(oppBehind.id) === 1)) {
+                } else if (!isWinning && oppBehind && mateBehind && (rankMap.get(mateBehind.id) - rankMap.get(oppBehind.id) === 1)) {
                     const dOpp = distBetween(this, oppBehind);
                     const activeMark = this.leg === 1 ? COURSE.mark1 : (this.leg === 2 ? COURSE.mark2 : (this.leg === 3 ? COURSE.mark3 : (this.leg === 4 ? COURSE.mark4 : null)));
                     const distToMark = activeMark ? distBetween(this, activeMark) : 999;
 
                     if (distToMark < THREE_BL_RADIUS * 1.45 && dOpp < 135) {
-                        // Mark Trap: brake right at the zone so opponent overlaps outside while teammate sails inside!
                         this.roleBadge = `MARK TRAP ON ${oppBehind.id}`;
                         this.luffing = true;
                     } else if (dOpp < 125) {
-                        // Open-course Passback / Pin
                         this.roleBadge = `PASSBACK ${oppBehind.id}->${mateBehind.id}`;
                         const interceptX = oppBehind.x + (this.leg === 1 || this.leg === 5 ? (oppBehind.tack === 'STBD' ? 22 : -22) : 0);
                         const interceptY = oppBehind.y - 24;
@@ -1075,7 +1033,6 @@
                     this.roleBadge = isWinning ? 'SAIL FAST' : 'HUNTING COMBO';
                 }
 
-                // Steer for current leg
                 const isUpwindLeg = (this.leg === 1 || this.leg === 5);
                 const isDownwindLeg = (this.leg === 3);
 
@@ -1087,7 +1044,6 @@
                     this.steerDirectly(desiredCourse, dt, 74);
                 }
 
-                // Teammate Switch-Tacking & Right-of-Way Avoidance
                 this.applyRightOfWayAvoidance(effWindDir, dt);
             }
 
@@ -1095,7 +1051,6 @@
                 const optimalCloseHauled = 42;
                 const diffToWind = Math.abs(angleDiff(desiredCourse, effWindDir));
 
-                // Check corridor / layline bounds so boats tack cleanly into M1 or Finish Line
                 let leftBound = 520;
                 let rightBound = 1040;
                 if (isFinishLeg) {
@@ -1104,14 +1059,12 @@
                 }
 
                 if (diffToWind < optimalCloseHauled + 6) {
-                    // Must beat upwind on close-hauled tacks
                     if (this.aiTackCooldown <= 0) {
                         if (this.x < leftBound && this.tack === 'STBD' && this.canSafelyTack()) {
                             this.triggerTack();
                         } else if (this.x > rightBound && this.tack === 'PORT' && this.canSafelyTack()) {
                             this.triggerTack();
                         } else {
-                            // Overstanding layline check
                             const wp = this.getWaypointForCurrentLeg();
                             const angleToWp = radToDeg(Math.atan2(wp.x - this.x, -(wp.y - this.y)));
                             const portCloseHauled = wrapAngle180(effWindDir + optimalCloseHauled);
@@ -1129,7 +1082,6 @@
                     const closeHauledHeading = wrapAngle180(effWindDir + tackSign * optimalCloseHauled);
                     this.steerDirectly(closeHauledHeading, dt, 66);
                 } else {
-                    // Can fetch waypoint directly
                     this.steerDirectly(desiredCourse, dt, 68);
                 }
             }
@@ -1185,7 +1137,6 @@
                     const d = distBetween(this, other);
                     if (d > BOAT_LENGTH * 2.4) continue;
 
-                    // Teammate Switch-Tacking (2008 Handbook Slides 22-44: Never duck a teammate while covering!)
                     if (other.team === this.team && this.tack !== other.tack && (this.leg === 1 || this.leg === 5)) {
                         if (this.aiTackCooldown <= 0 && d < BOAT_LENGTH * 1.9) {
                             this.roleBadge = `SWITCH TACK W/ ${other.id}`;
@@ -1195,7 +1146,6 @@
                         }
                     }
 
-                    // Rule 10: Port keeps clear of Starboard
                     if (this.tack === 'PORT' && other.tack === 'STBD') {
                         const bearingToOther = radToDeg(Math.atan2(other.x - this.x, -(other.y - this.y)));
                         if (Math.abs(angleDiff(bearingToOther, this.heading)) < 55) {
@@ -1205,13 +1155,11 @@
                         }
                     }
 
-                    // Rule 11: Windward keeps clear of Leeward on same tack
                     if (this.tack === other.tack && d < BOAT_LENGTH * 1.4) {
                         const windRad = degToRad(effWindDir);
                         const myUpwindProj = -(this.x * Math.sin(windRad) - this.y * Math.cos(windRad));
                         const otherUpwindProj = -(other.x * Math.sin(windRad) - other.y * Math.cos(windRad));
                         if (myUpwindProj > otherUpwindProj + 4) {
-                            // We are windward boat -> head up slightly to give room
                             const sign = this.tack === 'STBD' ? -1 : 1;
                             this.heading = wrapAngle180(this.heading - sign * 58 * dt);
                         }
@@ -1222,18 +1170,15 @@
             checkCourseProgress() {
                 if (gameState.phase !== 'RACING') return;
 
-                // Leg 0: Start Line Crossing (Must physically cross South to North between Start Pin and Start RC)
                 if (this.leg === 0) {
                     const lineY = COURSE.startPin.y;
                     if (this.ocs) {
-                        // Only the OCS boat needs to dip below the line to clear its individual OCS flag
                         if (this.y > lineY + 14 &&
                             this.x >= COURSE.startPin.x - 45 && this.x <= COURSE.startRC.x + 45) {
                             this.ocs = false;
                             showToast(`${this.id} cleared OCS below the line! Cross the line to start!`);
                         }
                     } else {
-                        // Legal boat (not OCS): if it crosses or is just crossing inside the line bounds, promote to Leg 1!
                         const crossedNorth = (this.prevY >= lineY && this.y <= lineY) ||
                                              (this.y < lineY && this.y > lineY - 45);
                         if (crossedNorth &&
@@ -1245,9 +1190,7 @@
                             }
                         }
                     }
-                }
-                // Leg 1: Mark 1 (Windward Left — Leave to Starboard)
-                else if (this.leg === 1) {
+                } else if (this.leg === 1) {
                     const m = COURSE.mark1;
                     if (this.markApproachStage === 0 && this.y < m.y + 22 && this.x < m.x + 28) {
                         this.markApproachStage = 1;
@@ -1260,9 +1203,7 @@
                             this.markApproachStage = 0;
                         }
                     }
-                }
-                // Leg 2: Mark 2 (Top Offset Reach — Leave to Starboard)
-                else if (this.leg === 2) {
+                } else if (this.leg === 2) {
                     const m = COURSE.mark2;
                     if (this.markApproachStage === 0 && this.x > m.x - 20 && this.y < m.y + 25) {
                         this.markApproachStage = 1;
@@ -1275,9 +1216,7 @@
                             this.markApproachStage = 0;
                         }
                     }
-                }
-                // Leg 3: Mark 3 (Downwind Run — Leave to Port)
-                else if (this.leg === 3) {
+                } else if (this.leg === 3) {
                     const m = COURSE.mark3;
                     if (this.markApproachStage === 0 && this.y > m.y - 25 && this.x < m.x + 25) {
                         this.markApproachStage = 1;
@@ -1290,9 +1229,7 @@
                             this.markApproachStage = 0;
                         }
                     }
-                }
-                // Leg 4: Mark 4 (Bottom Offset Reach — Leave to Port)
-                else if (this.leg === 4) {
+                } else if (this.leg === 4) {
                     const m = COURSE.mark4;
                     if (this.markApproachStage === 0 && this.x > m.x - 25 && this.y > m.y - 25) {
                         this.markApproachStage = 1;
@@ -1305,9 +1242,7 @@
                             this.markApproachStage = 0;
                         }
                     }
-                }
-                // Leg 5: Finish Line (Cross South to North between Finish Pin and Finish RC)
-                else if (this.leg === 5) {
+                } else if (this.leg === 5) {
                     const finY = COURSE.finishPin.y;
                     if (this.prevY >= finY && this.y < finY &&
                         this.x >= COURSE.finishPin.x - 22 && this.x <= COURSE.finishRC.x + 22) {
@@ -1358,7 +1293,6 @@
                         }
                     }
 
-                    // Lee-Bow Exhaust Check (Upwind same-tack slot ahead & to leeward)
                     if (source.tack === target.tack && source.twa < 65 && target.twa < 65 && d < BOAT_LENGTH * 1.9) {
                         const leeBowDir = wrapAngle180(source.heading + 180 + (source.tack === 'STBD' ? -28 : 28));
                         if (Math.abs(angleDiff(bearing, leeBowDir)) < 24) {
@@ -1378,14 +1312,12 @@
             for (const b of gameState.boats) {
                 if (!b.activeInRace || b.finished) continue;
 
-                // Rule 18: 3-Boat-Length Zone Tracking
                 const activeMark = b.leg === 1 ? COURSE.mark1 : (b.leg === 2 ? COURSE.mark2 : (b.leg === 3 ? COURSE.mark3 : (b.leg === 4 ? COURSE.mark4 : null)));
                 if (activeMark) {
                     const dMark = distBetween(b, activeMark);
                     const wasInZone = b.inZone;
                     b.inZone = dMark <= THREE_BL_RADIUS;
                     if (b.inZone && !wasInZone) {
-                        // Lock in Rule 18 status on zone entry
                         let insideRight = true;
                         for (const other of gameState.boats) {
                             if (!other.activeInRace || other === b || other.finished || other.leg !== b.leg) continue;
@@ -1402,7 +1334,6 @@
                     b.r18Right = null;
                 }
 
-                // Rule 31: Touching a Mark
                 for (const m of marks) {
                     const d = distBetween(b, m);
                     const minSep = MARK_RADIUS + 14;
@@ -1420,7 +1351,6 @@
                 }
             }
 
-            // Boat-on-Boat Right-of-Way & Contact
             for (let i = 0; i < gameState.boats.length; i++) {
                 for (let j = i + 1; j < gameState.boats.length; j++) {
                     const a = gameState.boats[i];
@@ -1491,7 +1421,6 @@
 
             const isPartyGuest = !!(mpState.partyCode && !mpState.isHost);
             if (isPartyGuest && mpState.hostRaceState) {
-                // Keep guest clock, phase, and base wind locked to host
                 gameState.phase = mpState.hostRaceState.phase || gameState.phase;
                 gameState.timer = mpState.hostRaceState.timer ?? gameState.timer;
                 gameState.baseWindDir = mpState.hostRaceState.baseWindDir ?? gameState.baseWindDir;
@@ -1505,12 +1434,10 @@
                 if (gameState.timer <= 0) {
                     gameState.phase = 'RACING';
                     gameState.timer = 0;
-                    // Check each boat individually for OCS above the start line at the gun
                     const ocsBoatIds = [];
                     for (const b of gameState.boats) {
                         if (!b.activeInRace) continue;
                         b.leg = 0;
-                        // Hull bow over the line at the gun (with small tolerance so boats holding on the line aren't falsely flagged)
                         if (b.y < COURSE.startPin.y - 8) {
                             b.ocs = true;
                             ocsBoatIds.push(b.id);
@@ -1533,7 +1460,6 @@
             const { sorted, rankMap } = computeStandings();
 
             for (const boat of gameState.boats) {
-                // If we are a guest in a multiplayer party, the Host simulates AI bots and sends their positions
                 if (isPartyGuest && !boat.isPlayer && !boat.isRemoteHuman && mpState.remotePlayers[boat.id]) {
                     boat.isRemoteHuman = true;
                 }
@@ -1574,7 +1500,6 @@
         function renderScene() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Deep Ocean Gradient Background
             const bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
             bgGrad.addColorStop(0, '#041b35');
             bgGrad.addColorStop(1, '#072a4f');
@@ -1603,7 +1528,6 @@
         }
 
         function renderWaterPuffsAndWaves() {
-            // Subtle Course Grid
             ctx.strokeStyle = 'rgba(56, 189, 248, 0.05)';
             ctx.lineWidth = 1;
             for (let x = 0; x <= WORLD_WIDTH; x += 200) {
@@ -1619,7 +1543,6 @@
                 ctx.stroke();
             }
 
-            // Visible Cat's-Paw Puffs & Glassy Lulls
             for (const p of gameState.puffs) {
                 ctx.save();
                 ctx.translate(p.x, p.y);
@@ -1637,7 +1560,6 @@
                 ctx.ellipse(0, 0, p.rx, p.ry, 0, 0, Math.PI * 2);
                 ctx.fill();
 
-                // Cat's-paw ripple arcs inside puffs
                 if (!p.isLull) {
                     ctx.strokeStyle = 'rgba(186, 230, 253, 0.22)';
                     ctx.lineWidth = 1.5;
@@ -1660,7 +1582,6 @@
                 ctx.restore();
             }
 
-            // Ambient Wind Wavelets
             const windRad = degToRad(gameState.baseWindDir + 90);
             ctx.strokeStyle = 'rgba(186, 230, 253, 0.12)';
             ctx.lineWidth = 1.5;
@@ -1675,7 +1596,6 @@
         }
 
         function renderCourseAndZones() {
-            // Digital N Course Leg Rhumb Lines & Directional Arrows
             const legs = [
                 { a: { x: 770, y: 2150 }, b: COURSE.mark1, label: 'LEG 1 (UPWIND)' },
                 { a: COURSE.mark1, b: COURSE.mark2, label: 'LEG 2 (TOP REACH)' },
@@ -1694,7 +1614,6 @@
                 ctx.lineTo(leg.b.x, leg.b.y);
                 ctx.stroke();
 
-                // Midpoint Directional Triangle matching the diagram
                 const mx = (leg.a.x + leg.b.x) * 0.5;
                 const my = (leg.a.y + leg.b.y) * 0.5;
                 const ang = Math.atan2(leg.b.x - leg.a.x, -(leg.b.y - leg.a.y));
@@ -1713,7 +1632,6 @@
             }
             ctx.restore();
 
-            // Start Line
             ctx.save();
             ctx.strokeStyle = gameState.phase === 'PRESTART' ? '#fbbf24' : '#38bdf8';
             ctx.lineWidth = 3;
@@ -1723,7 +1641,6 @@
             ctx.lineTo(COURSE.startRC.x, COURSE.startRC.y);
             ctx.stroke();
 
-            // Finish Line
             ctx.strokeStyle = '#10b981';
             ctx.beginPath();
             ctx.moveTo(COURSE.finishPin.x, COURSE.finishPin.y);
@@ -1731,7 +1648,6 @@
             ctx.stroke();
             ctx.restore();
 
-            // Rule 18 3-Boat-Length Zones around Marks 1-4
             if (config.showOverlays) {
                 const turningMarks = [COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4];
                 for (const m of turningMarks) {
@@ -1748,13 +1664,11 @@
                 }
             }
 
-            // Render Buoys & Pill-Shaped RC Boats
             const allMarks = [COURSE.startPin, COURSE.startRC, COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4, COURSE.finishPin, COURSE.finishRC];
             for (const m of allMarks) {
                 ctx.save();
                 ctx.translate(m.x, m.y);
                 if (m.isRC) {
-                    // Pill-shaped Red RC Boat matching diagram
                     ctx.fillStyle = '#ef4444';
                     ctx.strokeStyle = '#ffffff';
                     ctx.lineWidth = 2.5;
@@ -1789,7 +1703,6 @@
                 const spreadRad = degToRad(b.luffing ? 24 : 18);
                 const centerRad = degToRad(downwindDir);
 
-                // Downwind Dirty-Air Cone
                 ctx.save();
                 ctx.translate(b.x, b.y);
                 const grad = ctx.createRadialGradient(0, 0, 8, 0, 0, shadowLen);
@@ -1808,7 +1721,6 @@
                 ctx.closePath();
                 ctx.fill();
 
-                // Lee-Bow Exhaust Pocket (Orange Plume off Leeward Quarter when Upwind)
                 if (b.twa < 65) {
                     const leeBowDir = degToRad(wrapAngle180(b.heading + 180 + (b.tack === 'STBD' ? -28 : 28)));
                     const lbLen = BOAT_LENGTH * 1.85;
@@ -1841,7 +1753,6 @@
             ctx.translate(b.x, b.y);
             ctx.rotate(degToRad(b.heading));
 
-            // Highlight Ring for Local Player Boat
             if (b.isPlayer) {
                 ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
                 ctx.lineWidth = 2;
@@ -1852,7 +1763,6 @@
                 ctx.setLineDash([]);
             }
 
-            // C420 Hull
             ctx.fillStyle = b.team === 'BLUE' ? '#2563eb' : '#e11d48';
             ctx.strokeStyle = '#f8fafc';
             ctx.lineWidth = 2;
@@ -1865,19 +1775,16 @@
             ctx.fill();
             ctx.stroke();
 
-            // Cockpit Inner Deck
             ctx.fillStyle = b.team === 'BLUE' ? '#1d4ed8' : '#be123c';
             ctx.beginPath();
             ctx.roundRect(-5.5, -4, 11, 18, 3);
             ctx.fill();
 
-            // Mainsail & Jib Trim Angle
             const boomSide = b.tack === 'STBD' ? 1 : -1;
             const sheetRatio = Math.min(1, Math.max(0.15, (b.twa - 30) / 135));
             const boomAngle = boomSide * (14 + sheetRatio * 64);
             const luffWave = b.luffing ? Math.sin(performance.now() * 0.035) * 4.5 : 0;
 
-            // Mainsail
             ctx.save();
             ctx.translate(0, -6);
             ctx.rotate(degToRad(boomAngle));
@@ -1889,7 +1796,6 @@
             ctx.stroke();
             ctx.restore();
 
-            // Jib
             ctx.save();
             ctx.translate(0, -20);
             ctx.rotate(degToRad(boomAngle * 0.85));
@@ -1903,7 +1809,6 @@
 
             ctx.restore();
 
-            // Overhead Boat ID, Rank, Skipper Name & Tactical Badges
             ctx.save();
             ctx.font = 'bold 11px "JetBrains Mono", monospace';
             ctx.textAlign = 'center';
@@ -1938,7 +1843,6 @@
         }
 
         function updateTelemetryHUD(sorted, rankMap) {
-            // Timer & Phase
             const phaseEl = document.getElementById('racePhaseLabel');
             const timerEl = document.getElementById('raceTimerDisplay');
             if (gameState.phase === 'PRESTART') {
@@ -1957,12 +1861,10 @@
                 timerEl.textContent = `${mins}:${secs}`;
             }
 
-            // Wind Summary
             const windBadge = document.getElementById('windSummaryBadge');
             const twd = ((Math.round(gameState.baseWindDir) + 360) % 360).toString().padStart(3, '0');
             windBadge.textContent = `TWD ${twd}° • ${gameState.baseWindSpeed.toFixed(1)} kt`;
 
-            // Team Scoreboard & Active Play Callout
             const bluePlaces = gameState.boats.filter(b => b.activeInRace && b.team === 'BLUE').map(b => rankMap.get(b.id) || 6).sort((a, b) => a - b);
             const redPlaces = gameState.boats.filter(b => b.activeInRace && b.team === 'RED').map(b => rankMap.get(b.id) || 6).sort((a, b) => a - b);
             const blueSum = bluePlaces.reduce((s, v) => s + v, 0);
@@ -1991,7 +1893,6 @@
                 playCall.textContent = 'CONVERTING COMBO';
             }
 
-            // Player Boat Telemetry
             const player = gameState.boats.find(b => b.isPlayer && b.activeInRace) || gameState.boats[0];
             if (!player) return;
 
@@ -2080,11 +1981,15 @@
             config.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
             config.windMode = document.getElementById('selectWindMode').value || 'shifty';
 
+            let windSeed = Date.now();
             if (mpState.partyCode && mpState.partyData) {
                 config.startLengthSec = mpState.partyData.startLengthSec || config.startLengthSec;
                 config.penaltyTurnsRequired = mpState.partyData.penaltyTurnsRequired || config.penaltyTurnsRequired;
                 config.windMode = mpState.partyData.windMode || config.windMode;
                 config.fillWithBots = mpState.partyData.fillWithBots !== false;
+                if (mpState.partyData.raceStamp) {
+                    windSeed = mpState.partyData.raceStamp;
+                }
             }
 
             const degLabel = config.penaltyTurnsRequired === 1 ? '360°' : '720°';
@@ -2098,7 +2003,7 @@
             gameState.radioLogs = [];
             document.getElementById('tacticalFeed').innerHTML = '';
 
-            initWindField();
+            initWindField(windSeed);
 
             const slotSpecs = [
                 { id: 'B1', team: 'BLUE', x: 600, y: 2240, h: -42 },
@@ -2150,7 +2055,7 @@
             gameState.lastTime = performance.now();
         }
 
-        // Keyboard Input Listeners (using physical e.code so Shift + W/S/T/G/P never conflict)
+        // Keyboard Input Listeners
         window.addEventListener('keydown', (e) => {
             if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
 
@@ -2280,7 +2185,7 @@
         }
 
         // Initial background preview state
-        initWindField();
+        initWindField(101);
         gameState.boats = [
             new Boat('B1', 'BLUE', true,  600, 2240, -42),
             new Boat('B2', 'BLUE', false, 735, 2265, -42),
@@ -2292,695 +2197,880 @@
         requestAnimationFrame(gameLoop);
     </script>
 
-    <!-- REAL CROSS-DEVICE MULTIPLAYER ENGINE (WebRTC PeerJS + Global MQTT Public Discovery + Cloud Firestore) -->
-    <script type="module">
-        const BOAT_IDS = ['B1', 'B2', 'B3', 'R1', 'R2', 'R3'];
-        const STORAGE_KEY = 'c420_tr_parties_v2';
-        const PEER_PREFIX = 'c420tr-party-';
-        const MQTT_TOPIC_LOBBIES = 'c420tr/v2/public_lobbies';
-        const MQTT_TOPIC_ROOM_PREFIX = 'c420tr/v2/room/';
+    <!-- MULTI-BROKER CROSS-DEVICE MULTIPLAYER ENGINE (Redundant Global WSS MQTT Relays + STUN/TURN WebRTC PeerJS) -->
+    <script>
+        (function() {
+            const BOAT_IDS = ['B1', 'B2', 'B3', 'R1', 'R2', 'R3'];
+            const STORAGE_KEY = 'c420_tr_parties_v3';
+            const PEER_PREFIX = 'c420tr-v3-party-';
+            // Per-room retained topic pattern so multiple public rooms never overwrite each other!
+            const MQTT_LOBBY_WILDCARD = 'c420tr/v3/lobbies/+';
+            const MQTT_LOBBY_PREFIX   = 'c420tr/v3/lobbies/';
+            const MQTT_ROOM_PREFIX    = 'c420tr/v3/room/';
 
-        const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('c420_team_racing_channel_v2') : null;
-        let lastStartedRaceStamp = 0;
+            // Redundant Global WSS Brokers (connects simultaneously so if a school/ISP blocks one port, the others work seamlessly)
+            const MQTT_BROKER_URLS = [
+                'wss://broker.hivemq.com:8884/mqtt',
+                'wss://broker.emqx.io:8084/mqtt',
+                'wss://test.mosquitto.org:8081/mqtt'
+            ];
 
-        // Global Public Lobbies Map (aggregated from MQTT, Firestore, and LocalStorage)
-        const publicPartiesMap = new Map();
+            const ICE_SERVERS = [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ];
 
-        // PeerJS State (Host acts as WebRTC Star Hub for the 6-boat room; Guests connect to Host)
-        let peerInstance = null;
-        let hostConnections = new Map(); // uid -> DataConnection (used when mpState.isHost)
-        let guestConnection = null;      // DataConnection to Host (used when Guest)
-        const memberLastSeen = new Map(); // uid -> timestamp (ms) tracked by Host
-        let lastHostHeartbeat = 0;        // timestamp (ms) tracked by Guest
+            const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('c420_team_racing_channel_v3') : null;
+            let lastStartedRaceStamp = 0;
 
-        // MQTT Global Broker Client (Fallback + Public Lobby List across any device/network)
-        let mqttClient = null;
+            const publicPartiesMap = new Map();
+            const mqttClients = [];
+            const processedPacketIds = new Set();
 
-        function generateRoomCode() {
-            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-            let code = '';
-            for (let i = 0; i < 6; i++) {
-                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            let peerInstance = null;
+            let hostConnections = new Map();
+            let guestConnection = null;
+            const memberLastSeen = new Map();
+            let lastHostHeartbeat = 0;
+            let joinRetryTimer = null;
+
+            function generateRoomCode() {
+                const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+                let code = '';
+                for (let i = 0; i < 6; i++) {
+                    code += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return code;
             }
-            return code;
-        }
 
-        function getLocalParties() {
-            try {
-                const raw = localStorage.getItem(STORAGE_KEY);
-                return raw ? JSON.parse(raw) : {};
-            } catch (e) {
-                return {};
+            function makePacketId() {
+                return mpState.userId + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
             }
-        }
 
-        function saveLocalParty(partyDoc) {
-            if (!partyDoc || !partyDoc.code) return;
-            try {
-                const map = getLocalParties();
-                map[partyDoc.code] = partyDoc;
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-            } catch (e) {}
-        }
-
-        function setNetworkStatus(text, isOnline = true) {
-            const el = document.getElementById('mpUserIdDisplay');
-            const dot = document.getElementById('mpStatusDot');
-            if (el) el.textContent = text;
-            if (dot) {
-                dot.className = isOnline
-                    ? 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse'
-                    : 'w-2.5 h-2.5 rounded-full bg-amber-400';
-            }
-        }
-
-        function copyTextToClipboard(str) {
-            const ta = document.createElement('textarea');
-            ta.value = str;
-            document.body.appendChild(ta);
-            ta.select();
-            try {
-                document.execCommand('copy');
-                showToast(`📋 Copied Party Code ${str} to clipboard!`);
-            } catch (err) {}
-            document.body.removeChild(ta);
-        }
-
-        function deleteLocalParty(code) {
-            try {
-                const map = getLocalParties();
-                delete map[code];
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-            } catch (e) {}
-        }
-
-        function removeMemberFromHostParty(uid, reason = 'left') {
-            if (!mpState.isHost || !mpState.partyData || !uid || uid === mpState.userId) return;
-            const slots = { ...(mpState.partyData.slots || {}) };
-            let removedBoatId = null;
-            let removedName = 'Member';
-
-            for (const id of BOAT_IDS) {
-                if (slots[id] && slots[id].uid === uid) {
-                    removedName = slots[id].name || 'Member';
-                    removedBoatId = id;
-                    delete slots[id];
+            function getLocalParties() {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    return raw ? JSON.parse(raw) : {};
+                } catch (e) {
+                    return {};
                 }
             }
-            memberLastSeen.delete(uid);
-            hostConnections.delete(uid);
 
-            if (removedBoatId) {
-                mpState.partyData.slots = slots;
-                mpState.partyData.updatedAt = Date.now();
-                delete mpState.remotePlayers[removedBoatId];
+            function saveLocalParty(partyDoc) {
+                if (!partyDoc || !partyDoc.code) return;
+                try {
+                    const map = getLocalParties();
+                    map[partyDoc.code] = partyDoc;
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+                } catch (e) {}
+            }
 
-                // Update active race boat if race is running
-                const boatObj = gameState.boats.find(b => b.id === removedBoatId);
-                if (boatObj) {
-                    boatObj.isRemoteHuman = false;
-                    boatObj.skipperName = '';
-                    boatObj.activeInRace = mpState.partyData.fillWithBots !== false;
+            function deleteLocalParty(code) {
+                try {
+                    const map = getLocalParties();
+                    delete map[code];
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+                } catch (e) {}
+            }
+
+            function setNetworkStatus(text, isOnline = true) {
+                const el = document.getElementById('mpUserIdDisplay');
+                const dot = document.getElementById('mpStatusDot');
+                if (el) el.textContent = text;
+                if (dot) {
+                    dot.className = isOnline
+                        ? 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse'
+                        : 'w-2.5 h-2.5 rounded-full bg-amber-400';
+                }
+            }
+
+            function copyTextToClipboard(str) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(str).then(() => {
+                        showToast(`📋 Copied Party Code ${str} to clipboard!`);
+                    }).catch(() => {});
+                    return;
+                }
+                const ta = document.createElement('textarea');
+                ta.value = str;
+                document.body.appendChild(ta);
+                ta.select();
+                try {
+                    document.execCommand('copy');
+                    showToast(`📋 Copied Party Code ${str} to clipboard!`);
+                } catch (err) {}
+                document.body.removeChild(ta);
+            }
+
+            // Connect to multiple global WebSocket MQTT relays for 100% cross-device discovery and sync
+            function initGlobalMqttRelays() {
+                if (typeof mqtt === 'undefined') {
+                    setNetworkStatus('WebRTC P2P Mode Ready', true);
+                    return;
                 }
 
-                broadcastPartyStateFromHost();
-                showToast(`👋 ${removedName} (${removedBoatId}) ${reason} and was removed from the party.`);
-            }
-        }
-
-        function handleHostClosedParty(code) {
-            if (!mpState.partyCode || (code && code !== mpState.partyCode)) return;
-            const closedCode = mpState.partyCode;
-            publicPartiesMap.delete(closedCode);
-            deleteLocalParty(closedCode);
-
-            if (mqttClient && mqttClient.connected) {
-                mqttClient.unsubscribe(MQTT_TOPIC_ROOM_PREFIX + closedCode);
-            }
-            cleanupPeerConnections();
-
-            mpState.partyCode = null;
-            mpState.partyData = null;
-            mpState.isHost = false;
-            mpState.remotePlayers = {};
-            mpState.hostRaceState = null;
-
-            document.getElementById('mpActivePartyPanel').classList.add('hidden');
-            document.getElementById('mpLobbyBrowser').classList.remove('hidden');
-            document.getElementById('mpCurrentRoomBadge').classList.add('hidden');
-            document.getElementById('startRaceBtnLabel').textContent = 'Launch Race';
-            document.getElementById('mpLiveBadge').textContent = 'SOLO / BOT AI';
-
-            refreshPublicPartiesUI();
-            showToast(`⚠️ Party ${closedCode} was closed because the Host left.`);
-        }
-
-        // Initialize MQTT over WebSockets for instant global Public Party Discovery & Packet Relay
-        function initGlobalMqtt() {
-            if (typeof mqtt === 'undefined') return;
-            try {
-                mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
-                    clientId: 'c420_' + mpState.userId + '_' + Math.random().toString(16).slice(2, 6),
-                    clean: true,
-                    connectTimeout: 5000,
-                    reconnectPeriod: 3000
-                });
-
-                mqttClient.on('connect', () => {
-                    setNetworkStatus(`Online Ready • ID: ${mpState.userId}`, true);
-                    mqttClient.subscribe(MQTT_TOPIC_LOBBIES);
-                    if (mpState.partyCode) {
-                        mqttClient.subscribe(MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode);
-                    }
-                });
-
-                mqttClient.on('message', (topic, payload) => {
+                MQTT_BROKER_URLS.forEach((url, idx) => {
                     try {
-                        const msg = JSON.parse(payload.toString());
-                        if (!msg) return;
+                        const client = mqtt.connect(url, {
+                            clientId: 'c420_' + mpState.userId + '_' + idx + '_' + Math.random().toString(16).slice(2, 6),
+                            clean: true,
+                            connectTimeout: 6000,
+                            reconnectPeriod: 3500
+                        });
 
-                        if (topic === MQTT_TOPIC_LOBBIES && msg.party) {
-                            const p = msg.party;
-                            if (p.deleted || !p.isPublic) {
-                                publicPartiesMap.delete(p.code);
-                            } else {
-                                publicPartiesMap.set(p.code, p);
+                        client.on('connect', () => {
+                            const connectedCount = mqttClients.filter(c => c && c.connected).length;
+                            setNetworkStatus(`Global Online (${connectedCount} Relay${connectedCount > 1 ? 's' : ''}) • ${mpState.userId}`, true);
+                            client.subscribe(MQTT_LOBBY_WILDCARD, { qos: 0 });
+                            if (mpState.partyCode) {
+                                client.subscribe(MQTT_ROOM_PREFIX + mpState.partyCode, { qos: 0 });
                             }
-                            refreshPublicPartiesUI();
-                        } else if (mpState.partyCode && topic === (MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode)) {
-                            handleIncomingPartyPacket(msg);
-                        }
-                    } catch (err) {}
+                        });
+
+                        client.on('message', (topic, payload) => {
+                            try {
+                                const str = payload.toString();
+                                if (!str) return;
+                                const msg = JSON.parse(str);
+                                if (!msg) return;
+
+                                if (topic.startsWith(MQTT_LOBBY_PREFIX)) {
+                                    const code = topic.slice(MQTT_LOBBY_PREFIX.length);
+                                    const p = msg.party;
+                                    if (!p || p.deleted || !p.isPublic) {
+                                        publicPartiesMap.delete(code);
+                                    } else {
+                                        publicPartiesMap.set(code, p);
+                                    }
+                                    refreshPublicPartiesUI();
+                                } else if (mpState.partyCode && topic === (MQTT_ROOM_PREFIX + mpState.partyCode)) {
+                                    handleIncomingPartyPacket(msg);
+                                }
+                            } catch (err) {}
+                        });
+
+                        mqttClients.push(client);
+                    } catch (e) {}
                 });
-            } catch (e) {}
-        }
+            }
 
-        // Send a packet to everyone in the current party via WebRTC (PeerJS), MQTT room topic, and BroadcastChannel
-        function sendPartyPacket(packet) {
-            if (!mpState.partyCode) return;
-            packet.partyCode = mpState.partyCode;
-            packet.senderId = mpState.userId;
+            function subscribeToRoomRelays(code, onSubscribed) {
+                let called = false;
+                const topic = MQTT_ROOM_PREFIX + code;
+                let anyConnected = false;
 
-            // 1. WebRTC PeerJS Low-Latency DataChannel
-            if (mpState.isHost) {
-                for (const conn of hostConnections.values()) {
-                    if (conn && conn.open) {
-                        try { conn.send(packet); } catch (e) {}
+                mqttClients.forEach(client => {
+                    if (client && client.connected) {
+                        anyConnected = true;
+                        client.subscribe(topic, { qos: 0 }, () => {
+                            if (!called && onSubscribed) {
+                                called = true;
+                                onSubscribed();
+                            }
+                        });
                     }
-                }
-            } else if (guestConnection && guestConnection.open) {
-                try { guestConnection.send(packet); } catch (e) {}
-            }
+                });
 
-            // 2. Global MQTT Room Topic (Guarantees delivery even across strict NAT/firewalls)
-            if (mqttClient && mqttClient.connected) {
-                try {
-                    mqttClient.publish(MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode, JSON.stringify(packet));
-                } catch (e) {}
-            }
-
-            // 3. Same-Browser Cross-Tab BroadcastChannel
-            if (bc) {
-                try { bc.postMessage(packet); } catch (e) {}
-            }
-        }
-
-        function announcePublicLobby(partyDoc, deleted = false) {
-            if (!partyDoc) return;
-            if (deleted) {
-                deleteLocalParty(partyDoc.code);
-                publicPartiesMap.delete(partyDoc.code);
-            } else {
-                saveLocalParty(partyDoc);
-                if (partyDoc.isPublic) {
-                    publicPartiesMap.set(partyDoc.code, partyDoc);
-                } else {
-                    publicPartiesMap.delete(partyDoc.code);
+                if (!anyConnected && onSubscribed) {
+                    onSubscribed();
                 }
             }
-            refreshPublicPartiesUI();
 
-            if (mqttClient && mqttClient.connected) {
-                try {
-                    mqttClient.publish(
-                        MQTT_TOPIC_LOBBIES,
-                        JSON.stringify({ party: { ...partyDoc, deleted } }),
-                        { retain: true }
-                    );
-                } catch (e) {}
-            }
-            if (bc) {
-                try {
-                    bc.postMessage(deleted
-                        ? { type: 'PARTY_CLOSED', partyCode: partyDoc.code, code: partyDoc.code }
-                        : { type: 'PARTY_UPDATED', party: partyDoc }
-                    );
-                } catch (e) {}
-            }
-        }
-
-        function handleIncomingPartyPacket(msg) {
-            if (!msg || msg.senderId === mpState.userId) return;
-
-            if (msg.type === 'PARTY_CLOSED') {
-                const targetCode = msg.partyCode || msg.code;
-                if (targetCode) {
-                    publicPartiesMap.delete(targetCode);
-                    deleteLocalParty(targetCode);
-                    refreshPublicPartiesUI();
-                }
-                if (!mpState.isHost && mpState.partyCode && targetCode === mpState.partyCode) {
-                    handleHostClosedParty(targetCode);
-                }
-                return;
-            }
-
-            if (msg.type === 'MEMBER_HEARTBEAT' && mpState.isHost && msg.partyCode === mpState.partyCode) {
-                if (msg.uid) {
-                    memberLastSeen.set(msg.uid, Date.now());
-                }
-                return;
-            }
-
-            if (msg.type === 'JOIN_REQUEST' && mpState.isHost && mpState.partyData) {
-                memberLastSeen.set(msg.uid, Date.now());
-                const slots = { ...(mpState.partyData.slots || {}) };
-                let assigned = BOAT_IDS.find(id => slots[id] && slots[id].uid === msg.uid);
-                if (!assigned) {
-                    assigned = BOAT_IDS.find(id => !slots[id]);
-                }
-                if (assigned) {
-                    slots[assigned] = { uid: msg.uid, name: msg.name || 'Skipper' };
-                    mpState.partyData.slots = slots;
-                    mpState.partyData.updatedAt = Date.now();
-                    broadcastPartyStateFromHost();
-                    showToast(`⛵ ${msg.name} joined in boat ${assigned}!`);
-                }
-            } else if (msg.type === 'CLAIM_SLOT' && mpState.isHost && mpState.partyData) {
-                memberLastSeen.set(msg.uid, Date.now());
-                const slots = { ...(mpState.partyData.slots || {}) };
-                const target = msg.slotId;
-                const existing = slots[target];
-                if (!existing || existing.uid === msg.uid) {
-                    for (const id of BOAT_IDS) {
-                        if (slots[id] && slots[id].uid === msg.uid) delete slots[id];
+            function unsubscribeFromRoomRelays(code) {
+                if (!code) return;
+                const topic = MQTT_ROOM_PREFIX + code;
+                mqttClients.forEach(client => {
+                    if (client && client.connected) {
+                        try { client.unsubscribe(topic); } catch (e) {}
                     }
-                    slots[target] = { uid: msg.uid, name: msg.name || 'Skipper' };
-                    mpState.partyData.slots = slots;
-                    mpState.partyData.updatedAt = Date.now();
-                    broadcastPartyStateFromHost();
+                });
+            }
+
+            // Send a packet across WebRTC DataChannels, all connected Global MQTT Relays, and BroadcastChannel
+            function sendPartyPacket(packet) {
+                if (!mpState.partyCode) return;
+                packet.partyCode = mpState.partyCode;
+                packet.senderId = mpState.userId;
+                if (!packet.packetId) packet.packetId = makePacketId();
+
+                processedPacketIds.add(packet.packetId);
+                if (processedPacketIds.size > 400) {
+                    const first = processedPacketIds.values().next().value;
+                    processedPacketIds.delete(first);
                 }
-            } else if (msg.type === 'LEAVE_PARTY' && mpState.isHost && mpState.partyData) {
-                removeMemberFromHostParty(msg.uid, 'left');
-            } else if (msg.type === 'PARTY_UPDATED' && msg.party && msg.party.code === mpState.partyCode) {
-                lastHostHeartbeat = Date.now();
-                mpState.partyData = msg.party;
-                saveLocalParty(msg.party);
-                syncActivePartyUI();
-            } else if (msg.type === 'BOAT_STATE' && msg.partyCode === mpState.partyCode && msg.boat) {
-                if (msg.boat.uid) {
-                    memberLastSeen.set(msg.boat.uid, Date.now());
-                }
-                if (msg.boat.uid !== mpState.userId) {
-                    mpState.remotePlayers[msg.boat.boatId] = msg.boat;
-                }
-                // If we are Host, relay guest boat state to other connected PeerJS guests
+
+                // 1. WebRTC PeerJS DataChannel
                 if (mpState.isHost) {
-                    for (const [peerUid, conn] of hostConnections.entries()) {
-                        if (peerUid !== msg.senderId && conn && conn.open) {
-                            try { conn.send(msg); } catch (e) {}
+                    for (const conn of hostConnections.values()) {
+                        if (conn && conn.open) {
+                            try { conn.send(packet); } catch (e) {}
+                        }
+                    }
+                } else if (guestConnection && guestConnection.open) {
+                    try { guestConnection.send(packet); } catch (e) {}
+                }
+
+                // 2. All Connected Global MQTT WebSocket Relays
+                const serialized = JSON.stringify(packet);
+                const roomTopic = MQTT_ROOM_PREFIX + mpState.partyCode;
+                mqttClients.forEach(client => {
+                    if (client && client.connected) {
+                        try {
+                            client.publish(roomTopic, serialized, { qos: 0 });
+                        } catch (e) {}
+                    }
+                });
+
+                // 3. Same-device Cross-Tab BroadcastChannel
+                if (bc) {
+                    try { bc.postMessage(packet); } catch (e) {}
+                }
+            }
+
+            function announcePublicLobby(partyDoc, deleted = false) {
+                if (!partyDoc || !partyDoc.code) return;
+                const code = partyDoc.code;
+
+                if (deleted) {
+                    deleteLocalParty(code);
+                    publicPartiesMap.delete(code);
+                } else {
+                    saveLocalParty(partyDoc);
+                    if (partyDoc.isPublic) {
+                        publicPartiesMap.set(code, partyDoc);
+                    } else {
+                        publicPartiesMap.delete(code);
+                    }
+                }
+                refreshPublicPartiesUI();
+
+                const lobbyTopic = MQTT_LOBBY_PREFIX + code;
+                const payload = JSON.stringify({ party: { ...partyDoc, deleted } });
+                mqttClients.forEach(client => {
+                    if (client && client.connected) {
+                        try {
+                            client.publish(lobbyTopic, payload, { qos: 0, retain: true });
+                        } catch (e) {}
+                    }
+                });
+
+                if (bc) {
+                    try {
+                        bc.postMessage(deleted
+                            ? { type: 'PARTY_CLOSED', partyCode: code, code }
+                            : { type: 'PARTY_UPDATED', party: partyDoc }
+                        );
+                    } catch (e) {}
+                }
+            }
+
+            function removeMemberFromHostParty(uid, reason = 'left') {
+                if (!mpState.isHost || !mpState.partyData || !uid || uid === mpState.userId) return;
+                const slots = { ...(mpState.partyData.slots || {}) };
+                let removedBoatId = null;
+                let removedName = 'Member';
+
+                for (const id of BOAT_IDS) {
+                    if (slots[id] && slots[id].uid === uid) {
+                        removedName = slots[id].name || 'Member';
+                        removedBoatId = id;
+                        delete slots[id];
+                    }
+                }
+                memberLastSeen.delete(uid);
+                hostConnections.delete(uid);
+
+                if (removedBoatId) {
+                    mpState.partyData.slots = slots;
+                    mpState.partyData.updatedAt = Date.now();
+                    delete mpState.remotePlayers[removedBoatId];
+
+                    const boatObj = gameState.boats.find(b => b.id === removedBoatId);
+                    if (boatObj) {
+                        boatObj.isRemoteHuman = false;
+                        boatObj.skipperName = '';
+                        boatObj.activeInRace = mpState.partyData.fillWithBots !== false;
+                    }
+
+                    broadcastPartyStateFromHost();
+                    showToast(`👋 ${removedName} (${removedBoatId}) ${reason}.`);
+                }
+            }
+
+            function handleHostClosedParty(code) {
+                if (!mpState.partyCode || (code && code !== mpState.partyCode)) return;
+                const closedCode = mpState.partyCode;
+                clearInterval(joinRetryTimer);
+                publicPartiesMap.delete(closedCode);
+                deleteLocalParty(closedCode);
+
+                unsubscribeFromRoomRelays(closedCode);
+                cleanupPeerConnections();
+
+                mpState.partyCode = null;
+                mpState.partyData = null;
+                mpState.isHost = false;
+                mpState.remotePlayers = {};
+                mpState.hostRaceState = null;
+
+                document.getElementById('mpActivePartyPanel').classList.add('hidden');
+                document.getElementById('mpLobbyBrowser').classList.remove('hidden');
+                document.getElementById('mpCurrentRoomBadge').classList.add('hidden');
+                document.getElementById('startRaceBtnLabel').textContent = 'Launch Race';
+                document.getElementById('mpLiveBadge').textContent = 'SOLO / BOT AI';
+
+                refreshPublicPartiesUI();
+                showToast(`⚠️ Party ${closedCode} was closed because the Host left.`);
+            }
+
+            function handleIncomingPartyPacket(msg) {
+                if (!msg || msg.senderId === mpState.userId) return;
+                if (msg.packetId) {
+                    if (processedPacketIds.has(msg.packetId)) return;
+                    processedPacketIds.add(msg.packetId);
+                }
+
+                if (msg.type === 'PARTY_CLOSED') {
+                    const targetCode = msg.partyCode || msg.code;
+                    if (targetCode) {
+                        publicPartiesMap.delete(targetCode);
+                        deleteLocalParty(targetCode);
+                        refreshPublicPartiesUI();
+                    }
+                    if (!mpState.isHost && mpState.partyCode && targetCode === mpState.partyCode) {
+                        handleHostClosedParty(targetCode);
+                    }
+                    return;
+                }
+
+                if (msg.type === 'MEMBER_HEARTBEAT' && mpState.isHost && msg.partyCode === mpState.partyCode) {
+                    if (msg.uid) {
+                        memberLastSeen.set(msg.uid, Date.now());
+                    }
+                    return;
+                }
+
+                if (msg.type === 'JOIN_REQUEST' && mpState.isHost && mpState.partyData && msg.partyCode === mpState.partyCode) {
+                    memberLastSeen.set(msg.uid, Date.now());
+                    const slots = { ...(mpState.partyData.slots || {}) };
+                    const alreadyIn = BOAT_IDS.find(id => slots[id] && slots[id].uid === msg.uid);
+                    let assigned = alreadyIn;
+                    if (!assigned) {
+                        assigned = BOAT_IDS.find(id => !slots[id]);
+                    }
+                    if (assigned) {
+                        slots[assigned] = { uid: msg.uid, name: msg.name || 'Skipper' };
+                        mpState.partyData.slots = slots;
+                        mpState.partyData.updatedAt = Date.now();
+                        broadcastPartyStateFromHost();
+                        if (!alreadyIn) {
+                            showToast(`⛵ ${msg.name} joined in boat ${assigned}!`);
+                        }
+                    } else {
+                        // Party full, still broadcast current state so guest sees slots
+                        broadcastPartyStateFromHost();
+                    }
+                } else if (msg.type === 'CLAIM_SLOT' && mpState.isHost && mpState.partyData && msg.partyCode === mpState.partyCode) {
+                    memberLastSeen.set(msg.uid, Date.now());
+                    const slots = { ...(mpState.partyData.slots || {}) };
+                    const target = msg.slotId;
+                    const existing = slots[target];
+                    if (!existing || existing.uid === msg.uid) {
+                        for (const id of BOAT_IDS) {
+                            if (slots[id] && slots[id].uid === msg.uid) delete slots[id];
+                        }
+                        slots[target] = { uid: msg.uid, name: msg.name || 'Skipper' };
+                        mpState.partyData.slots = slots;
+                        mpState.partyData.updatedAt = Date.now();
+                        broadcastPartyStateFromHost();
+                    }
+                } else if (msg.type === 'LEAVE_PARTY' && mpState.isHost && mpState.partyData && msg.partyCode === mpState.partyCode) {
+                    removeMemberFromHostParty(msg.uid, 'left the party');
+                } else if (msg.type === 'PARTY_UPDATED' && msg.party && msg.party.code === mpState.partyCode) {
+                    lastHostHeartbeat = Date.now();
+                    mpState.partyData = msg.party;
+                    saveLocalParty(msg.party);
+
+                    // Check if we are now assigned a slot in the Host's party
+                    const mySlot = BOAT_IDS.find(id => msg.party.slots && msg.party.slots[id] && msg.party.slots[id].uid === mpState.userId);
+                    if (mySlot) {
+                        clearInterval(joinRetryTimer);
+                        const syncBadge = document.getElementById('partySyncBadge');
+                        if (syncBadge) syncBadge.textContent = `● Connected (${mySlot})`;
+                    }
+                    syncActivePartyUI();
+                } else if (msg.type === 'BOAT_STATE' && msg.partyCode === mpState.partyCode && msg.boat) {
+                    if (msg.boat.uid) {
+                        memberLastSeen.set(msg.boat.uid, Date.now());
+                    }
+                    if (msg.boat.uid !== mpState.userId) {
+                        mpState.remotePlayers[msg.boat.boatId] = msg.boat;
+                        const targetBoat = gameState.boats.find(b => b.id === msg.boat.boatId);
+                        if (targetBoat && !targetBoat.isPlayer) {
+                            targetBoat.isRemoteHuman = true;
+                            targetBoat.activeInRace = true;
+                        }
+                    }
+                    // Host relays guest boat state over WebRTC to other guests
+                    if (mpState.isHost) {
+                        for (const [peerUid, conn] of hostConnections.entries()) {
+                            if (peerUid !== msg.senderId && conn && conn.open) {
+                                try { conn.send(msg); } catch (e) {}
+                            }
+                        }
+                    }
+                } else if (msg.type === 'HOST_WORLD_SYNC' && !mpState.isHost && msg.partyCode === mpState.partyCode) {
+                    lastHostHeartbeat = Date.now();
+                    mpState.hostRaceState = {
+                        phase: msg.phase,
+                        timer: msg.timer,
+                        baseWindDir: msg.baseWindDir,
+                        baseWindSpeed: msg.baseWindSpeed
+                    };
+                    if (Array.isArray(msg.boats)) {
+                        for (const bState of msg.boats) {
+                            const localPlayerBoat = gameState.boats.find(b => b.isPlayer && b.activeInRace);
+                            if (localPlayerBoat && localPlayerBoat.id === bState.boatId) continue;
+                            mpState.remotePlayers[bState.boatId] = bState;
+                            const boatObj = gameState.boats.find(b => b.id === bState.boatId);
+                            if (boatObj && !boatObj.isPlayer) {
+                                boatObj.isRemoteHuman = true;
+                            }
                         }
                     }
                 }
-            } else if (msg.type === 'HOST_WORLD_SYNC' && !mpState.isHost && msg.partyCode === mpState.partyCode) {
-                lastHostHeartbeat = Date.now();
-                mpState.hostRaceState = {
-                    phase: msg.phase,
-                    timer: msg.timer,
-                    baseWindDir: msg.baseWindDir,
-                    baseWindSpeed: msg.baseWindSpeed
+            }
+
+            function broadcastPartyStateFromHost() {
+                if (!mpState.partyData) return;
+                saveLocalParty(mpState.partyData);
+
+                // Publish retained party state to the room topic so any newly-subscribing guest receives it immediately!
+                const pkt = {
+                    type: 'PARTY_UPDATED',
+                    partyCode: mpState.partyCode,
+                    senderId: mpState.userId,
+                    packetId: makePacketId(),
+                    party: mpState.partyData
                 };
-                if (Array.isArray(msg.boats)) {
-                    for (const bState of msg.boats) {
-                        // Don't overwrite the local player's own boat
-                        const localPlayerBoat = gameState.boats.find(b => b.isPlayer && b.activeInRace);
-                        if (localPlayerBoat && localPlayerBoat.id === bState.boatId) continue;
-                        mpState.remotePlayers[bState.boatId] = bState;
+                sendPartyPacket(pkt);
+
+                const roomTopic = MQTT_ROOM_PREFIX + mpState.partyCode;
+                const serialized = JSON.stringify(pkt);
+                mqttClients.forEach(client => {
+                    if (client && client.connected) {
+                        try { client.publish(roomTopic, serialized, { qos: 0, retain: true }); } catch (e) {}
+                    }
+                });
+
+                announcePublicLobby(mpState.partyData, false);
+                syncActivePartyUI();
+            }
+
+            function refreshPublicPartiesUI() {
+                const localMap = getLocalParties();
+                for (const p of Object.values(localMap)) {
+                    if (p && p.isPublic && !p.deleted) publicPartiesMap.set(p.code, p);
+                }
+
+                const cutoff = Date.now() - 18000;
+                for (const [code, room] of publicPartiesMap.entries()) {
+                    if (!room || room.deleted || !room.isPublic || (room.updatedAt || 0) <= cutoff) {
+                        publicPartiesMap.delete(code);
+                        deleteLocalParty(code);
                     }
                 }
-            }
-        }
 
-        function broadcastPartyStateFromHost() {
-            if (!mpState.partyData) return;
-            saveLocalParty(mpState.partyData);
-            sendPartyPacket({
-                type: 'PARTY_UPDATED',
-                party: mpState.partyData
-            });
-            announcePublicLobby(mpState.partyData, false);
-            syncActivePartyUI();
-        }
+                const publicRooms = Array.from(publicPartiesMap.values())
+                    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
-        function refreshPublicPartiesUI() {
-            const localMap = getLocalParties();
-            for (const p of Object.values(localMap)) {
-                if (p && p.isPublic && !p.deleted) publicPartiesMap.set(p.code, p);
-            }
+                document.getElementById('publicPartiesCount').textContent = `${publicRooms.length} Active`;
+                const listEl = document.getElementById('publicPartiesList');
+                if (publicRooms.length === 0) {
+                    listEl.innerHTML = `<div class="text-slate-500 text-[11px] italic py-2 text-center">No public parties open right now. Click "Host Public Party" to start one!</div>`;
+                } else {
+                    listEl.innerHTML = publicRooms.map(room => {
+                        const playerCount = Object.keys(room.slots || {}).length;
+                        const botsLabel = room.fillWithBots !== false ? '+AI Bots' : 'Humans Only';
+                        return `
+                            <div class="flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                                <div>
+                                    <span class="font-extrabold mono text-amber-300">${room.code}</span>
+                                    <span class="text-slate-300 ml-1.5 font-semibold">${room.hostName || 'Host'}</span>
+                                    <span class="text-[10px] text-slate-400 ml-1">(${playerCount}/6 • ${botsLabel})</span>
+                                </div>
+                                <button data-join-code="${room.code}" class="public-join-btn px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]">
+                                    Join
+                                </button>
+                            </div>
+                        `;
+                    }).join('');
 
-            // Expire any public party whose host hasn't updated within the last 12 seconds
-            const cutoff = Date.now() - 12000;
-            for (const [code, room] of publicPartiesMap.entries()) {
-                if (!room || room.deleted || !room.isPublic || (room.updatedAt || 0) <= cutoff) {
-                    publicPartiesMap.delete(code);
-                    deleteLocalParty(code);
+                    listEl.querySelectorAll('.public-join-btn').forEach(btn => {
+                        btn.addEventListener('click', () => joinPartyByCode(btn.getAttribute('data-join-code')));
+                    });
                 }
             }
 
-            const publicRooms = Array.from(publicPartiesMap.values())
-                .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+            function renderPartySlotsUI() {
+                const grid = document.getElementById('partySlotsGrid');
+                if (!grid || !mpState.partyData) return;
 
-            document.getElementById('publicPartiesCount').textContent = `${publicRooms.length} Active`;
-            const listEl = document.getElementById('publicPartiesList');
-            if (publicRooms.length === 0) {
-                listEl.innerHTML = `<div class="text-slate-500 text-[11px] italic py-2 text-center">No public parties open right now. Click "Host Public Party" to start one!</div>`;
-            } else {
-                listEl.innerHTML = publicRooms.map(room => {
-                    const playerCount = Object.keys(room.slots || {}).length;
-                    const botsLabel = room.fillWithBots !== false ? '+AI Bots' : 'Humans Only';
+                const slots = mpState.partyData.slots || {};
+                const fillBots = mpState.partyData.fillWithBots !== false;
+
+                grid.innerHTML = BOAT_IDS.map(boatId => {
+                    const isBlue = boatId.startsWith('B');
+                    const owner = slots[boatId];
+                    const isMe = owner && owner.uid === mpState.userId;
+                    const teamColor = isBlue ? 'border-blue-500/50 bg-blue-950/40' : 'border-rose-500/50 bg-rose-950/40';
+                    const badgeColor = isBlue ? 'text-blue-400' : 'text-rose-400';
+
+                    let statusText = fillBots ? '🤖 AI Bot' : '⭕ Empty Slot';
+                    if (owner) {
+                        statusText = isMe ? `👤 ${owner.name} (YOU)` : `👤 ${owner.name}`;
+                    }
+
                     return `
-                        <div class="flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800">
-                            <div>
-                                <span class="font-extrabold mono text-amber-300">${room.code}</span>
-                                <span class="text-slate-300 ml-1.5 font-semibold">${room.hostName || 'Host'}</span>
-                                <span class="text-[10px] text-slate-400 ml-1">(${playerCount}/6 • ${botsLabel})</span>
+                        <button data-slot="${boatId}" class="slot-claim-btn p-2.5 rounded-xl border ${teamColor} ${isMe ? 'ring-2 ring-sky-400' : 'hover:border-sky-400/60'} text-left transition flex flex-col justify-between">
+                            <div class="flex items-center justify-between">
+                                <span class="font-extrabold mono text-sm ${badgeColor}">${boatId}</span>
+                                <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-900/90 text-slate-300">${isBlue ? 'BLUE' : 'RED'}</span>
                             </div>
-                            <button data-join-code="${room.code}" class="public-join-btn px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]">
-                                Join
-                            </button>
-                        </div>
+                            <div class="text-[11px] font-bold text-white truncate mt-1.5">${statusText}</div>
+                            <div class="text-[9px] text-sky-300 font-semibold mt-1">${isMe ? 'Selected' : (owner ? 'Claimed' : 'Click to Claim')}</div>
+                        </button>
                     `;
                 }).join('');
 
-                listEl.querySelectorAll('.public-join-btn').forEach(btn => {
-                    btn.addEventListener('click', () => joinPartyByCode(btn.getAttribute('data-join-code')));
+                grid.querySelectorAll('.slot-claim-btn').forEach(btn => {
+                    btn.addEventListener('click', () => claimBoatSlot(btn.getAttribute('data-slot')));
                 });
             }
-        }
 
-        function renderPartySlotsUI() {
-            const grid = document.getElementById('partySlotsGrid');
-            if (!grid || !mpState.partyData) return;
+            function syncActivePartyUI() {
+                if (!mpState.partyCode || !mpState.partyData) return;
+                const data = mpState.partyData;
 
-            const slots = mpState.partyData.slots || {};
-            const fillBots = mpState.partyData.fillWithBots !== false;
-
-            grid.innerHTML = BOAT_IDS.map(boatId => {
-                const isBlue = boatId.startsWith('B');
-                const owner = slots[boatId];
-                const isMe = owner && owner.uid === mpState.userId;
-                const teamColor = isBlue ? 'border-blue-500/50 bg-blue-950/40' : 'border-rose-500/50 bg-rose-950/40';
-                const badgeColor = isBlue ? 'text-blue-400' : 'text-rose-400';
-
-                let statusText = fillBots ? '🤖 AI Bot' : '⭕ Empty Slot';
-                if (owner) {
-                    statusText = isMe ? `👤 ${owner.name} (YOU)` : `👤 ${owner.name}`;
+                const tag = document.getElementById('partyPrivacyTag');
+                if (data.isPublic) {
+                    tag.textContent = 'PUBLIC';
+                    tag.className = 'px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+                } else {
+                    tag.textContent = 'PRIVATE';
+                    tag.className = 'px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40';
                 }
 
-                return `
-                    <button data-slot="${boatId}" class="slot-claim-btn p-2.5 rounded-xl border ${teamColor} ${isMe ? 'ring-2 ring-sky-400' : 'hover:border-sky-400/60'} text-left transition flex flex-col justify-between">
-                        <div class="flex items-center justify-between">
-                            <span class="font-extrabold mono text-sm ${badgeColor}">${boatId}</span>
-                            <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-900/90 text-slate-300">${isBlue ? 'BLUE' : 'RED'}</span>
-                        </div>
-                        <div class="text-[11px] font-bold text-white truncate mt-1.5">${statusText}</div>
-                        <div class="text-[9px] text-sky-300 font-semibold mt-1">${isMe ? 'Selected' : (owner ? 'Claimed' : 'Click to Claim')}</div>
-                    </button>
-                `;
-            }).join('');
+                const botToggle = document.getElementById('partyFillBotsToggle');
+                botToggle.checked = data.fillWithBots !== false;
+                botToggle.disabled = !mpState.isHost;
+                config.fillWithBots = data.fillWithBots !== false;
 
-            grid.querySelectorAll('.slot-claim-btn').forEach(btn => {
-                btn.addEventListener('click', () => claimBoatSlot(btn.getAttribute('data-slot')));
-            });
-        }
-
-        function syncActivePartyUI() {
-            if (!mpState.partyCode || !mpState.partyData) return;
-            const data = mpState.partyData;
-
-            const tag = document.getElementById('partyPrivacyTag');
-            if (data.isPublic) {
-                tag.textContent = 'PUBLIC';
-                tag.className = 'px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
-            } else {
-                tag.textContent = 'PRIVATE';
-                tag.className = 'px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40';
-            }
-
-            const botToggle = document.getElementById('partyFillBotsToggle');
-            botToggle.checked = data.fillWithBots !== false;
-            botToggle.disabled = !mpState.isHost;
-            config.fillWithBots = data.fillWithBots !== false;
-
-            const mySlot = BOAT_IDS.find(id => data.slots && data.slots[id] && data.slots[id].uid === mpState.userId);
-            if (mySlot) {
-                config.playerBoatId = mySlot;
-                document.getElementById('selectedBoatHeaderBadge').textContent = `${mySlot.startsWith('B') ? 'BLUE' : 'RED'} (${mySlot})`;
-            }
-
-            const playerCount = Object.keys(data.slots || {}).length;
-            document.getElementById('startRaceBtnLabel').textContent = mpState.isHost
-                ? `Launch Party Race (${playerCount} Joined)`
-                : `Launch / Sync Race (${mpState.partyCode})`;
-            document.getElementById('mpLiveBadge').textContent = `PARTY: ${mpState.partyCode} (${playerCount}P)`;
-            renderPartySlotsUI();
-
-            if (data.raceStamp && data.raceStamp !== lastStartedRaceStamp) {
-                lastStartedRaceStamp = data.raceStamp;
-                startNewRegatta();
-            }
-        }
-
-        function cleanupPeerConnections() {
-            for (const conn of hostConnections.values()) {
-                try { conn.close(); } catch (e) {}
-            }
-            hostConnections.clear();
-            if (guestConnection) {
-                try { guestConnection.close(); } catch (e) {}
-                guestConnection = null;
-            }
-            if (peerInstance) {
-                try { peerInstance.destroy(); } catch (e) {}
-                peerInstance = null;
-            }
-        }
-
-        function createParty(isPublic) {
-            cleanupPeerConnections();
-            const code = generateRoomCode();
-            mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
-            const startLen = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
-            const penTurns = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
-            const windMode = document.getElementById('selectWindMode').value || 'shifty';
-
-            const partyDoc = {
-                code,
-                hostId: mpState.userId,
-                hostName: mpState.playerName,
-                isPublic: !!isPublic,
-                fillWithBots: true,
-                status: 'LOBBY',
-                startLengthSec: startLen,
-                penaltyTurnsRequired: penTurns,
-                windMode,
-                raceStamp: 0,
-                updatedAt: Date.now(),
-                slots: {
-                    B1: { uid: mpState.userId, name: mpState.playerName }
+                const mySlot = BOAT_IDS.find(id => data.slots && data.slots[id] && data.slots[id].uid === mpState.userId);
+                if (mySlot) {
+                    config.playerBoatId = mySlot;
+                    document.getElementById('selectedBoatHeaderBadge').textContent = `${mySlot.startsWith('B') ? 'BLUE' : 'RED'} (${mySlot})`;
                 }
-            };
 
-            mpState.partyCode = code;
-            mpState.partyData = partyDoc;
-            mpState.isHost = true;
-            mpState.remotePlayers = {};
+                const playerCount = Object.keys(data.slots || {}).length;
+                document.getElementById('startRaceBtnLabel').textContent = mpState.isHost
+                    ? `Launch Party Race (${playerCount} Joined)`
+                    : `Launch / Sync Race (${mpState.partyCode})`;
+                document.getElementById('mpLiveBadge').textContent = `PARTY: ${mpState.partyCode} (${playerCount}P)`;
+                renderPartySlotsUI();
 
-            if (mqttClient && mqttClient.connected) {
-                mqttClient.subscribe(MQTT_TOPIC_ROOM_PREFIX + code);
+                if (data.raceStamp && data.raceStamp !== lastStartedRaceStamp) {
+                    lastStartedRaceStamp = data.raceStamp;
+                    startNewRegatta();
+                }
             }
 
-            // Create WebRTC Host Peer listening on deterministic ID `c420tr-party-CODE`
-            if (typeof Peer !== 'undefined') {
-                try {
-                    peerInstance = new Peer(PEER_PREFIX + code);
-                    peerInstance.on('open', () => {
-                        setNetworkStatus(`Hosting ${code} (WebRTC + Cloud Live)`, true);
-                    });
-                    peerInstance.on('connection', (conn) => {
-                        conn.on('open', () => {
-                            hostConnections.set(conn.peer, conn);
-                            if (mpState.partyData) {
-                                conn.send({ type: 'PARTY_UPDATED', party: mpState.partyData });
-                            }
+            function cleanupPeerConnections() {
+                clearInterval(joinRetryTimer);
+                for (const conn of hostConnections.values()) {
+                    try { conn.close(); } catch (e) {}
+                }
+                hostConnections.clear();
+                if (guestConnection) {
+                    try { guestConnection.close(); } catch (e) {}
+                    guestConnection = null;
+                }
+                if (peerInstance) {
+                    try { peerInstance.destroy(); } catch (e) {}
+                    peerInstance = null;
+                }
+            }
+
+            function createParty(isPublic) {
+                cleanupPeerConnections();
+                const code = generateRoomCode();
+                mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
+                const startLen = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
+                const penTurns = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
+                const windMode = document.getElementById('selectWindMode').value || 'shifty';
+
+                const partyDoc = {
+                    code,
+                    hostId: mpState.userId,
+                    hostName: mpState.playerName,
+                    isPublic: !!isPublic,
+                    fillWithBots: true,
+                    status: 'LOBBY',
+                    startLengthSec: startLen,
+                    penaltyTurnsRequired: penTurns,
+                    windMode,
+                    raceStamp: 0,
+                    updatedAt: Date.now(),
+                    slots: {
+                        B1: { uid: mpState.userId, name: mpState.playerName }
+                    }
+                };
+
+                mpState.partyCode = code;
+                mpState.partyData = partyDoc;
+                mpState.isHost = true;
+                mpState.remotePlayers = {};
+
+                subscribeToRoomRelays(code, () => {
+                    broadcastPartyStateFromHost();
+                });
+
+                // Create WebRTC Host Peer with explicit STUN servers
+                if (typeof Peer !== 'undefined') {
+                    try {
+                        peerInstance = new Peer(PEER_PREFIX + code, {
+                            config: { iceServers: ICE_SERVERS }
                         });
-                        conn.on('data', (data) => {
-                            if (data) {
-                                const guestUid = data.uid || data.senderId;
-                                if (guestUid) {
-                                    conn._guestUid = guestUid;
-                                    hostConnections.set(guestUid, conn);
-                                    memberLastSeen.set(guestUid, Date.now());
+                        peerInstance.on('open', () => {
+                            setNetworkStatus(`Hosting ${code} (Global Relay + P2P)`, true);
+                        });
+                        peerInstance.on('connection', (conn) => {
+                            conn.on('open', () => {
+                                hostConnections.set(conn.peer, conn);
+                                if (mpState.partyData) {
+                                    conn.send({
+                                        type: 'PARTY_UPDATED',
+                                        partyCode: code,
+                                        senderId: mpState.userId,
+                                        packetId: makePacketId(),
+                                        party: mpState.partyData
+                                    });
                                 }
-                            }
-                            handleIncomingPartyPacket(data);
+                            });
+                            conn.on('data', (data) => {
+                                if (data) {
+                                    const guestUid = data.uid || data.senderId;
+                                    if (guestUid) {
+                                        conn._guestUid = guestUid;
+                                        hostConnections.set(guestUid, conn);
+                                        memberLastSeen.set(guestUid, Date.now());
+                                    }
+                                }
+                                handleIncomingPartyPacket(data);
+                            });
+                            const onGuestDisconnect = () => {
+                                hostConnections.delete(conn.peer);
+                                if (conn._guestUid) {
+                                    removeMemberFromHostParty(conn._guestUid, 'closed their tab');
+                                }
+                            };
+                            conn.on('close', onGuestDisconnect);
+                            conn.on('error', onGuestDisconnect);
                         });
-                        const onGuestDisconnect = () => {
-                            hostConnections.delete(conn.peer);
-                            if (conn._guestUid) {
-                                removeMemberFromHostParty(conn._guestUid, 'closed their tab');
-                            }
-                        };
-                        conn.on('close', onGuestDisconnect);
-                        conn.on('error', onGuestDisconnect);
-                    });
-                } catch (e) {}
+                    } catch (e) {}
+                }
+
+                document.getElementById('mpLobbyBrowser').classList.add('hidden');
+                document.getElementById('mpActivePartyPanel').classList.remove('hidden');
+                document.getElementById('partyCodeDisplay').textContent = code;
+                const syncBadge = document.getElementById('partySyncBadge');
+                if (syncBadge) syncBadge.textContent = '● Hosting Live';
+                const curBadge = document.getElementById('mpCurrentRoomBadge');
+                curBadge.textContent = `HOSTING: ${code}`;
+                curBadge.classList.remove('hidden');
+
+                broadcastPartyStateFromHost();
+                showToast(`Hosted ${isPublic ? 'Public' : 'Private'} Party ${code}! Share the code across any device.`);
             }
 
-            document.getElementById('mpLobbyBrowser').classList.add('hidden');
-            document.getElementById('mpActivePartyPanel').classList.remove('hidden');
-            document.getElementById('partyCodeDisplay').textContent = code;
-            const curBadge = document.getElementById('mpCurrentRoomBadge');
-            curBadge.textContent = `HOSTING: ${code}`;
-            curBadge.classList.remove('hidden');
+            function joinPartyByCode(rawCode) {
+                const code = (rawCode || '').trim().toUpperCase();
+                if (!code || code.length < 4) {
+                    showToast('Enter a valid 6-character Party Code!');
+                    return;
+                }
 
-            broadcastPartyStateFromHost();
-            showToast(`Hosted ${isPublic ? 'Public' : 'Private'} Party ${code}! Share the code with friends.`);
-        }
+                cleanupPeerConnections();
+                mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
+                mpState.partyCode = code;
+                mpState.isHost = false;
+                mpState.remotePlayers = {};
+                lastHostHeartbeat = Date.now();
 
-        function joinPartyByCode(rawCode) {
-            const code = (rawCode || '').trim().toUpperCase();
-            if (!code || code.length < 4) {
-                showToast('Enter a valid 6-character Party Code!');
-                return;
-            }
+                const knownParty = publicPartiesMap.get(code) || getLocalParties()[code];
+                mpState.partyData = knownParty || {
+                    code,
+                    hostId: '',
+                    hostName: 'Connecting...',
+                    isPublic: true,
+                    fillWithBots: true,
+                    status: 'LOBBY',
+                    startLengthSec: 30,
+                    penaltyTurnsRequired: 1,
+                    windMode: 'shifty',
+                    raceStamp: 0,
+                    slots: {}
+                };
 
-            cleanupPeerConnections();
-            mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
-            mpState.partyCode = code;
-            mpState.isHost = false;
-            mpState.remotePlayers = {};
-            lastHostHeartbeat = Date.now();
+                document.getElementById('mpLobbyBrowser').classList.add('hidden');
+                document.getElementById('mpActivePartyPanel').classList.remove('hidden');
+                document.getElementById('partyCodeDisplay').textContent = code;
+                const syncBadge = document.getElementById('partySyncBadge');
+                if (syncBadge) syncBadge.textContent = '● Joining Room...';
+                const curBadge = document.getElementById('mpCurrentRoomBadge');
+                curBadge.textContent = `PARTY: ${code}`;
+                curBadge.classList.remove('hidden');
+                syncActivePartyUI();
 
-            // Temporary placeholder until Host responds over WebRTC / MQTT / LocalStorage
-            const knownParty = publicPartiesMap.get(code) || getLocalParties()[code];
-            mpState.partyData = knownParty || {
-                code,
-                hostId: '',
-                hostName: 'Connecting...',
-                isPublic: true,
-                fillWithBots: true,
-                status: 'LOBBY',
-                startLengthSec: 30,
-                penaltyTurnsRequired: 1,
-                windMode: 'shifty',
-                raceStamp: 0,
-                slots: {}
-            };
-
-            document.getElementById('mpLobbyBrowser').classList.add('hidden');
-            document.getElementById('mpActivePartyPanel').classList.remove('hidden');
-            document.getElementById('partyCodeDisplay').textContent = code;
-            const curBadge = document.getElementById('mpCurrentRoomBadge');
-            curBadge.textContent = `PARTY: ${code}`;
-            curBadge.classList.remove('hidden');
-            syncActivePartyUI();
-
-            if (mqttClient && mqttClient.connected) {
-                mqttClient.subscribe(MQTT_TOPIC_ROOM_PREFIX + code, () => {
+                const sendJoinReq = () => {
+                    if (!mpState.partyCode || mpState.isHost) return;
                     sendPartyPacket({
                         type: 'JOIN_REQUEST',
                         uid: mpState.userId,
                         name: mpState.playerName
                     });
+                };
+
+                subscribeToRoomRelays(code, () => {
+                    sendJoinReq();
                 });
-            }
 
-            // Also send via BroadcastChannel for same-computer tabs
-            sendPartyPacket({
-                type: 'JOIN_REQUEST',
-                uid: mpState.userId,
-                name: mpState.playerName
-            });
+                // Keep sending JOIN_REQUEST every 1.2s until the Host assigns us a boat slot
+                joinRetryTimer = setInterval(() => {
+                    if (!mpState.partyCode || mpState.isHost) {
+                        clearInterval(joinRetryTimer);
+                        return;
+                    }
+                    const slots = (mpState.partyData && mpState.partyData.slots) ? mpState.partyData.slots : {};
+                    const mySlot = BOAT_IDS.find(id => slots[id] && slots[id].uid === mpState.userId);
+                    if (mySlot) {
+                        clearInterval(joinRetryTimer);
+                        return;
+                    }
+                    sendJoinReq();
+                }, 1200);
 
-            // Connect via WebRTC PeerJS directly to the Host's Peer ID
-            if (typeof Peer !== 'undefined') {
-                try {
-                    peerInstance = new Peer();
-                    peerInstance.on('open', () => {
-                        const conn = peerInstance.connect(PEER_PREFIX + code, { reliable: true });
-                        guestConnection = conn;
-                        conn.on('open', () => {
-                            lastHostHeartbeat = Date.now();
-                            setNetworkStatus(`Connected to ${code} (P2P Live)`, true);
-                            conn.send({
-                                type: 'JOIN_REQUEST',
-                                senderId: mpState.userId,
-                                partyCode: code,
-                                uid: mpState.userId,
-                                name: mpState.playerName
+                // Also connect via WebRTC PeerJS with STUN servers (note: do NOT close party on WebRTC failure, because MQTT relays still work!)
+                if (typeof Peer !== 'undefined') {
+                    try {
+                        peerInstance = new Peer({
+                            config: { iceServers: ICE_SERVERS }
+                        });
+                        peerInstance.on('open', () => {
+                            const conn = peerInstance.connect(PEER_PREFIX + code, { reliable: true });
+                            guestConnection = conn;
+                            conn.on('open', () => {
+                                lastHostHeartbeat = Date.now();
+                                setNetworkStatus(`Connected to ${code} (P2P + Relay)`, true);
+                                conn.send({
+                                    type: 'JOIN_REQUEST',
+                                    senderId: mpState.userId,
+                                    partyCode: code,
+                                    packetId: makePacketId(),
+                                    uid: mpState.userId,
+                                    name: mpState.playerName
+                                });
+                            });
+                            conn.on('data', (data) => {
+                                lastHostHeartbeat = Date.now();
+                                handleIncomingPartyPacket(data);
                             });
                         });
-                        conn.on('data', (data) => {
-                            lastHostHeartbeat = Date.now();
-                            handleIncomingPartyPacket(data);
+                    } catch (e) {}
+                }
+
+                showToast(`Joining Party ${code} across network...`);
+            }
+
+            function claimBoatSlot(targetBoatId) {
+                if (!mpState.partyCode || !mpState.partyData) return;
+                mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
+
+                const slots = { ...(mpState.partyData.slots || {}) };
+                const existing = slots[targetBoatId];
+                if (existing && existing.uid !== mpState.userId) {
+                    showToast(`Slot ${targetBoatId} is already claimed by ${existing.name}`);
+                    return;
+                }
+
+                if (mpState.isHost) {
+                    for (const id of BOAT_IDS) {
+                        if (slots[id] && slots[id].uid === mpState.userId) delete slots[id];
+                    }
+                    slots[targetBoatId] = { uid: mpState.userId, name: mpState.playerName };
+                    mpState.partyData.slots = slots;
+                    mpState.partyData.updatedAt = Date.now();
+                    config.playerBoatId = targetBoatId;
+                    broadcastPartyStateFromHost();
+                } else {
+                    config.playerBoatId = targetBoatId;
+                    sendPartyPacket({
+                        type: 'CLAIM_SLOT',
+                        uid: mpState.userId,
+                        name: mpState.playerName,
+                        slotId: targetBoatId
+                    });
+                }
+            }
+
+            function leaveCurrentParty() {
+                clearInterval(joinRetryTimer);
+                if (mpState.partyCode) {
+                    const oldCode = mpState.partyCode;
+                    if (mpState.isHost && mpState.partyData) {
+                        sendPartyPacket({
+                            type: 'PARTY_CLOSED',
+                            code: oldCode
                         });
-                        conn.on('close', () => {
-                            if (mpState.partyCode === code && !mpState.isHost) {
-                                handleHostClosedParty(code);
+                        announcePublicLobby(mpState.partyData, true);
+                        // Clear retained room state
+                        mqttClients.forEach(client => {
+                            if (client && client.connected) {
+                                try { client.publish(MQTT_ROOM_PREFIX + oldCode, '', { qos: 0, retain: true }); } catch (e) {}
                             }
                         });
-                    });
-                } catch (e) {}
-            }
-
-            showToast(`Connecting to Party ${code}...`);
-        }
-
-        function claimBoatSlot(targetBoatId) {
-            if (!mpState.partyCode || !mpState.partyData) return;
-            mpState.playerName = (document.getElementById('playerNameInput').value || 'Skipper').trim().slice(0, 14);
-
-            const slots = { ...(mpState.partyData.slots || {}) };
-            const existing = slots[targetBoatId];
-            if (existing && existing.uid !== mpState.userId) {
-                showToast(`Slot ${targetBoatId} is already claimed by ${existing.name}`);
-                return;
-            }
-
-            if (mpState.isHost) {
-                for (const id of BOAT_IDS) {
-                    if (slots[id] && slots[id].uid === mpState.userId) delete slots[id];
+                    } else {
+                        sendPartyPacket({
+                            type: 'LEAVE_PARTY',
+                            uid: mpState.userId
+                        });
+                    }
+                    unsubscribeFromRoomRelays(oldCode);
                 }
-                slots[targetBoatId] = { uid: mpState.userId, name: mpState.playerName };
-                mpState.partyData.slots = slots;
-                mpState.partyData.updatedAt = Date.now();
-                config.playerBoatId = targetBoatId;
-                broadcastPartyStateFromHost();
-            } else {
-                // Optimistically update UI & send request to Host
-                config.playerBoatId = targetBoatId;
-                sendPartyPacket({
-                    type: 'CLAIM_SLOT',
-                    uid: mpState.userId,
-                    name: mpState.playerName,
-                    slotId: targetBoatId
-                });
-            }
-        }
+                cleanupPeerConnections();
+                memberLastSeen.clear();
+                mpState.partyCode = null;
+                mpState.partyData = null;
+                mpState.isHost = false;
+                mpState.remotePlayers = {};
+                mpState.hostRaceState = null;
 
-        function leaveCurrentParty() {
-            if (mpState.partyCode) {
+                document.getElementById('mpActivePartyPanel').classList.add('hidden');
+                document.getElementById('mpLobbyBrowser').classList.remove('hidden');
+                document.getElementById('mpCurrentRoomBadge').classList.add('hidden');
+                document.getElementById('startRaceBtnLabel').textContent = 'Launch Race';
+                document.getElementById('mpLiveBadge').textContent = 'SOLO / BOT AI';
+                refreshPublicPartiesUI();
+                showToast('Left multiplayer party.');
+            }
+
+            // Detect when the GitHub.io / Browser tab is closed or navigated away
+            let unloadHandled = false;
+            function handleTabCloseOrUnload() {
+                if (unloadHandled || !mpState.partyCode) return;
+                unloadHandled = true;
                 if (mpState.isHost && mpState.partyData) {
                     sendPartyPacket({
                         type: 'PARTY_CLOSED',
@@ -2993,199 +3083,160 @@
                         uid: mpState.userId
                     });
                 }
-                if (mqttClient && mqttClient.connected) {
-                    mqttClient.unsubscribe(MQTT_TOPIC_ROOM_PREFIX + mpState.partyCode);
-                }
+                cleanupPeerConnections();
             }
-            cleanupPeerConnections();
-            memberLastSeen.clear();
-            mpState.partyCode = null;
-            mpState.partyData = null;
-            mpState.isHost = false;
-            mpState.remotePlayers = {};
-            mpState.hostRaceState = null;
 
-            document.getElementById('mpActivePartyPanel').classList.add('hidden');
-            document.getElementById('mpLobbyBrowser').classList.remove('hidden');
-            document.getElementById('mpCurrentRoomBadge').classList.add('hidden');
-            document.getElementById('startRaceBtnLabel').textContent = 'Launch Race';
-            document.getElementById('mpLiveBadge').textContent = 'SOLO / BOT AI';
-            refreshPublicPartiesUI();
-            showToast('Left multiplayer party.');
-        }
+            window.addEventListener('pagehide', handleTabCloseOrUnload);
+            window.addEventListener('beforeunload', handleTabCloseOrUnload);
 
-        // Detect when the GitHub.io / Browser tab is closed or navigated away
-        let unloadHandled = false;
-        function handleTabCloseOrUnload() {
-            if (unloadHandled || !mpState.partyCode) return;
-            unloadHandled = true;
-            if (mpState.isHost && mpState.partyData) {
-                sendPartyPacket({
-                    type: 'PARTY_CLOSED',
-                    code: mpState.partyCode
-                });
-                announcePublicLobby(mpState.partyData, true);
-            } else {
-                sendPartyPacket({
-                    type: 'LEAVE_PARTY',
-                    uid: mpState.userId
-                });
-            }
-            cleanupPeerConnections();
-        }
+            // Live Heartbeat & Disconnect Watchdog (every 2.0 seconds)
+            setInterval(() => {
+                const now = Date.now();
 
-        window.addEventListener('pagehide', handleTabCloseOrUnload);
-        window.addEventListener('beforeunload', handleTabCloseOrUnload);
+                if (mpState.partyCode) {
+                    if (mpState.isHost && mpState.partyData) {
+                        mpState.partyData.updatedAt = now;
+                        broadcastPartyStateFromHost();
 
-        // Live Heartbeat & Disconnect Watchdog (every 2.5 seconds)
-        setInterval(() => {
-            const now = Date.now();
-
-            if (mpState.partyCode) {
-                if (mpState.isHost && mpState.partyData) {
-                    // 1. Host refreshes party timestamp and checks for disconnected members (> 7.5s silent)
-                    mpState.partyData.updatedAt = now;
-                    broadcastPartyStateFromHost();
-
-                    const slots = mpState.partyData.slots || {};
-                    for (const id of BOAT_IDS) {
-                        const occupant = slots[id];
-                        if (occupant && occupant.uid && occupant.uid !== mpState.userId) {
-                            const lastSeen = memberLastSeen.get(occupant.uid) || now;
-                            if (now - lastSeen > 7500) {
-                                removeMemberFromHostParty(occupant.uid, 'disconnected');
+                        const slots = mpState.partyData.slots || {};
+                        for (const id of BOAT_IDS) {
+                            const occupant = slots[id];
+                            if (occupant && occupant.uid && occupant.uid !== mpState.userId) {
+                                const lastSeen = memberLastSeen.get(occupant.uid) || now;
+                                if (now - lastSeen > 12000) {
+                                    removeMemberFromHostParty(occupant.uid, 'disconnected');
+                                }
                             }
                         }
-                    }
-                } else if (!mpState.isHost) {
-                    // 2. Guest sends heartbeat to Host & checks if Host disappeared (> 8.5s silent)
-                    sendPartyPacket({
-                        type: 'MEMBER_HEARTBEAT',
-                        uid: mpState.userId,
-                        name: mpState.playerName
-                    });
+                    } else if (!mpState.isHost) {
+                        sendPartyPacket({
+                            type: 'MEMBER_HEARTBEAT',
+                            uid: mpState.userId,
+                            name: mpState.playerName
+                        });
 
-                    if (lastHostHeartbeat > 0 && (now - lastHostHeartbeat > 8500)) {
-                        handleHostClosedParty(mpState.partyCode);
+                        if (lastHostHeartbeat > 0 && (now - lastHostHeartbeat > 15000)) {
+                            handleHostClosedParty(mpState.partyCode);
+                        }
                     }
                 }
-            }
 
-            refreshPublicPartiesUI();
-        }, 2500);
+                refreshPublicPartiesUI();
+            }, 2000);
 
-        window.triggerPartyRaceStart = function() {
-            if (mpState.partyCode && mpState.partyData) {
-                if (mpState.isHost) {
-                    mpState.partyData.startLengthSec = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
-                    mpState.partyData.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
-                    mpState.partyData.windMode = document.getElementById('selectWindMode').value || 'shifty';
-                    mpState.partyData.status = 'RACING';
-                    mpState.partyData.raceStamp = Date.now();
-                    mpState.partyData.updatedAt = Date.now();
-                    lastStartedRaceStamp = mpState.partyData.raceStamp;
-                    broadcastPartyStateFromHost();
-                    startNewRegatta();
+            window.triggerPartyRaceStart = function() {
+                if (mpState.partyCode && mpState.partyData) {
+                    if (mpState.isHost) {
+                        mpState.partyData.startLengthSec = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
+                        mpState.partyData.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
+                        mpState.partyData.windMode = document.getElementById('selectWindMode').value || 'shifty';
+                        mpState.partyData.status = 'RACING';
+                        mpState.partyData.raceStamp = Date.now();
+                        mpState.partyData.updatedAt = Date.now();
+                        lastStartedRaceStamp = mpState.partyData.raceStamp;
+                        broadcastPartyStateFromHost();
+                        startNewRegatta();
+                    } else {
+                        startNewRegatta();
+                    }
                 } else {
                     startNewRegatta();
                 }
-            } else {
-                startNewRegatta();
-            }
-        };
-
-        window.syncLocalBoatToParty = function() {
-            if (!mpState.partyCode || !gameState.running) return;
-            const now = performance.now();
-            if (now - mpState.lastSyncSent < 45) return;
-            mpState.lastSyncSent = now;
-
-            const playerBoat = gameState.boats.find(b => b.isPlayer && b.activeInRace);
-            if (playerBoat) {
-                sendPartyPacket({
-                    type: 'BOAT_STATE',
-                    boat: {
-                        boatId: playerBoat.id,
-                        uid: mpState.userId,
-                        skipperName: mpState.playerName,
-                        x: playerBoat.x,
-                        y: playerBoat.y,
-                        heading: playerBoat.heading,
-                        speed: playerBoat.speed,
-                        tack: playerBoat.tack,
-                        twa: playerBoat.twa,
-                        luffing: playerBoat.luffing,
-                        spinning: playerBoat.spinning,
-                        penalties: playerBoat.penalties,
-                        leg: playerBoat.leg,
-                        finished: playerBoat.finished,
-                        finishTime: playerBoat.finishTime,
-                        ocs: playerBoat.ocs
-                    }
-                });
-            }
-
-            // Host also broadcasts authoritative timer, wind, and AI bot boats so all players stay in sync
-            if (mpState.isHost) {
-                const slots = (mpState.partyData && mpState.partyData.slots) ? mpState.partyData.slots : {};
-                const botBoats = gameState.boats
-                    .filter(b => b.activeInRace && !slots[b.id])
-                    .map(b => ({
-                        boatId: b.id,
-                        uid: 'HOST_BOT',
-                        skipperName: '',
-                        x: b.x,
-                        y: b.y,
-                        heading: b.heading,
-                        speed: b.speed,
-                        tack: b.tack,
-                        twa: b.twa,
-                        luffing: b.luffing,
-                        spinning: b.spinning,
-                        penalties: b.penalties,
-                        leg: b.leg,
-                        finished: b.finished,
-                        finishTime: b.finishTime,
-                        ocs: b.ocs
-                    }));
-
-                sendPartyPacket({
-                    type: 'HOST_WORLD_SYNC',
-                    phase: gameState.phase,
-                    timer: gameState.timer,
-                    baseWindDir: gameState.baseWindDir,
-                    baseWindSpeed: gameState.baseWindSpeed,
-                    boats: botBoats
-                });
-            }
-        };
-
-        if (bc) {
-            bc.onmessage = (ev) => {
-                handleIncomingPartyPacket(ev.data);
             };
-        }
 
-        // Bind Party Lobby UI Buttons
-        document.getElementById('createPublicPartyBtn').addEventListener('click', () => createParty(true));
-        document.getElementById('createPrivatePartyBtn').addEventListener('click', () => createParty(false));
-        document.getElementById('joinByCodeBtn').addEventListener('click', () => {
-            joinPartyByCode(document.getElementById('joinCodeInput').value);
-        });
-        document.getElementById('copyPartyCodeBtn').addEventListener('click', () => {
-            if (mpState.partyCode) copyTextToClipboard(mpState.partyCode);
-        });
-        document.getElementById('leavePartyBtn').addEventListener('click', leaveCurrentParty);
-        document.getElementById('partyFillBotsToggle').addEventListener('change', (e) => {
-            if (!mpState.partyCode || !mpState.partyData || !mpState.isHost) return;
-            mpState.partyData.fillWithBots = e.target.checked;
-            mpState.partyData.updatedAt = Date.now();
-            broadcastPartyStateFromHost();
-        });
+            window.syncLocalBoatToParty = function() {
+                if (!mpState.partyCode || !gameState.running) return;
+                const now = performance.now();
+                if (now - mpState.lastSyncSent < 55) return;
+                mpState.lastSyncSent = now;
 
-        setNetworkStatus(`Connecting • ID: ${mpState.userId}`, true);
-        initGlobalMqtt();
-        refreshPublicPartiesUI();
+                const playerBoat = gameState.boats.find(b => b.isPlayer && b.activeInRace);
+                if (playerBoat) {
+                    sendPartyPacket({
+                        type: 'BOAT_STATE',
+                        boat: {
+                            boatId: playerBoat.id,
+                            uid: mpState.userId,
+                            skipperName: mpState.playerName,
+                            x: Math.round(playerBoat.x * 10) / 10,
+                            y: Math.round(playerBoat.y * 10) / 10,
+                            heading: Math.round(playerBoat.heading * 10) / 10,
+                            speed: Math.round(playerBoat.speed * 100) / 100,
+                            tack: playerBoat.tack,
+                            twa: Math.round(playerBoat.twa),
+                            luffing: playerBoat.luffing,
+                            spinning: playerBoat.spinning,
+                            penalties: playerBoat.penalties,
+                            leg: playerBoat.leg,
+                            finished: playerBoat.finished,
+                            finishTime: playerBoat.finishTime,
+                            ocs: playerBoat.ocs
+                        }
+                    });
+                }
+
+                // Host also broadcasts authoritative timer, wind, and AI bot boats so all devices stay in sync
+                if (mpState.isHost) {
+                    const slots = (mpState.partyData && mpState.partyData.slots) ? mpState.partyData.slots : {};
+                    const botBoats = gameState.boats
+                        .filter(b => b.activeInRace && !slots[b.id])
+                        .map(b => ({
+                            boatId: b.id,
+                            uid: 'HOST_BOT',
+                            skipperName: '',
+                            x: Math.round(b.x * 10) / 10,
+                            y: Math.round(b.y * 10) / 10,
+                            heading: Math.round(b.heading * 10) / 10,
+                            speed: Math.round(b.speed * 100) / 100,
+                            tack: b.tack,
+                            twa: Math.round(b.twa),
+                            luffing: b.luffing,
+                            spinning: b.spinning,
+                            penalties: b.penalties,
+                            leg: b.leg,
+                            finished: b.finished,
+                            finishTime: b.finishTime,
+                            ocs: b.ocs
+                        }));
+
+                    sendPartyPacket({
+                        type: 'HOST_WORLD_SYNC',
+                        phase: gameState.phase,
+                        timer: Math.round(gameState.timer * 100) / 100,
+                        baseWindDir: Math.round(gameState.baseWindDir * 10) / 10,
+                        baseWindSpeed: Math.round(gameState.baseWindSpeed * 10) / 10,
+                        boats: botBoats
+                    });
+                }
+            };
+
+            if (bc) {
+                bc.onmessage = (ev) => {
+                    handleIncomingPartyPacket(ev.data);
+                };
+            }
+
+            // Bind Party Lobby UI Buttons
+            document.getElementById('createPublicPartyBtn').addEventListener('click', () => createParty(true));
+            document.getElementById('createPrivatePartyBtn').addEventListener('click', () => createParty(false));
+            document.getElementById('joinByCodeBtn').addEventListener('click', () => {
+                joinPartyByCode(document.getElementById('joinCodeInput').value);
+            });
+            document.getElementById('copyPartyCodeBtn').addEventListener('click', () => {
+                if (mpState.partyCode) copyTextToClipboard(mpState.partyCode);
+            });
+            document.getElementById('leavePartyBtn').addEventListener('click', leaveCurrentParty);
+            document.getElementById('partyFillBotsToggle').addEventListener('change', (e) => {
+                if (!mpState.partyCode || !mpState.partyData || !mpState.isHost) return;
+                mpState.partyData.fillWithBots = e.target.checked;
+                mpState.partyData.updatedAt = Date.now();
+                broadcastPartyStateFromHost();
+            });
+
+            setNetworkStatus(`Connecting Relays • ${mpState.userId}`, true);
+            initGlobalMqttRelays();
+            refreshPublicPartiesUI();
+        })();
     </script>
 </body>
 </html>
