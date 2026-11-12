@@ -2315,6 +2315,57 @@
 
         // MQTT Global Broker Client (Fallback + Public Lobby List across any device/network)
         let mqttClient = null;
+
+        function generateRoomCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let code = '';
+            for (let i = 0; i < 6; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return code;
+        }
+
+        function getLocalParties() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveLocalParty(partyDoc) {
+            if (!partyDoc || !partyDoc.code) return;
+            try {
+                const map = getLocalParties();
+                map[partyDoc.code] = partyDoc;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+            } catch (e) {}
+        }
+
+        function setNetworkStatus(text, isOnline = true) {
+            const el = document.getElementById('mpUserIdDisplay');
+            const dot = document.getElementById('mpStatusDot');
+            if (el) el.textContent = text;
+            if (dot) {
+                dot.className = isOnline
+                    ? 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse'
+                    : 'w-2.5 h-2.5 rounded-full bg-amber-400';
+            }
+        }
+
+        function copyTextToClipboard(str) {
+            const ta = document.createElement('textarea');
+            ta.value = str;
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                showToast(`📋 Copied Party Code ${str} to clipboard!`);
+            } catch (err) {}
+            document.body.removeChild(ta);
+        }
+
         function deleteLocalParty(code) {
             try {
                 const map = getLocalParties();
