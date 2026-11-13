@@ -45,10 +45,15 @@
         }
 
         .hud-panel {
-            background: rgba(15, 23, 42, 0.88);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(148, 163, 184, 0.22);
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.55);
+            background: rgba(15, 23, 42, 0.58);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            box-shadow: 0 8px 20px -5px rgba(0, 0, 0, 0.4);
+            transition: opacity 0.2s ease, background-color 0.2s ease;
+        }
+
+        .hud-panel:hover {
+            background: rgba(15, 23, 42, 0.82);
         }
 
         .mono {
@@ -85,163 +90,195 @@
     <!-- Fullscreen 2D Canvas -->
     <canvas id="gameCanvas"></canvas>
 
-    <!-- Umpire / Race Committee Toast Banner -->
-    <div id="toastBanner" class="fixed top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none opacity-0 transition-opacity duration-300">
-        <div class="px-5 py-2 rounded-full bg-slate-950/95 border border-sky-400/50 text-sky-200 font-extrabold text-xs sm:text-sm tracking-wide shadow-2xl flex items-center gap-2">
-            <i class="fa-solid fa-bullhorn text-amber-400"></i>
-            <span id="toastText">Race Committee Ready</span>
+    <!-- PERIPHERAL IN-GAME HUD (TOP-CENTER COMPLETELY CLEAR FOR UPWIND VISIBILITY) -->
+    <!-- Top-Left Corner: Compact Clock, Wind & Active Leg -->
+    <div class="fixed top-2.5 left-2.5 z-20 flex flex-col gap-1.5 pointer-events-none max-w-xs">
+        <div class="hud-panel rounded-xl px-3 py-2 flex items-center gap-2.5 pointer-events-auto">
+            <div>
+                <div id="racePhaseLabel" class="text-[9px] font-extrabold uppercase tracking-wider text-amber-400">PRE-START</div>
+                <div id="raceTimerDisplay" class="mono text-lg sm:text-xl font-extrabold text-white leading-tight">0:30.0</div>
+                <div id="finishWindowBadge" class="hidden mono text-[9px] font-extrabold text-rose-400 animate-pulse">FIN WIN: 90.0s</div>
+            </div>
+            <div class="h-7 w-px bg-slate-700/70"></div>
+            <div>
+                <div id="currentLegDisplay" class="text-xs font-extrabold text-sky-300 leading-tight">Start Line</div>
+                <div id="windSummaryBadge" class="text-[10px] font-bold text-emerald-300 mono mt-0.5">TWD 000° • 12.0 kt</div>
+                <div id="penaltyConfigBadge" class="hidden text-[9px] font-bold text-slate-400 mono">RRS D1.3: 1-Turn</div>
+            </div>
+        </div>
+
+        <!-- Non-Overlapping Side Notification Toast (Sits neatly below Top-Left Clock) -->
+        <div id="toastBanner" class="pointer-events-none opacity-0 transition-opacity duration-300">
+            <div class="hud-panel px-3 py-1.5 rounded-xl border border-sky-400/40 text-sky-200 font-bold text-[11px] tracking-wide flex items-center gap-2">
+                <i class="fa-solid fa-bullhorn text-amber-400"></i>
+                <span id="toastText">Race Committee Ready</span>
+            </div>
         </div>
     </div>
 
-    <!-- TOP HUD BAR -->
-    <div class="fixed top-2 left-2 right-2 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        <!-- Left: Start Clock & Active Leg -->
-        <div class="hud-panel rounded-xl px-3.5 py-2 flex items-center gap-3 pointer-events-auto">
-            <div>
-                <div id="racePhaseLabel" class="text-[10px] font-extrabold uppercase tracking-wider text-amber-400">PRE-START</div>
-                <div id="raceTimerDisplay" class="mono text-xl sm:text-2xl font-extrabold text-white leading-tight">0:30.0</div>
-            </div>
-            <div class="h-8 w-px bg-slate-700"></div>
-            <div>
-                <div class="text-[10px] font-bold uppercase text-slate-400">Active Leg</div>
-                <div id="currentLegDisplay" class="text-xs sm:text-sm font-extrabold text-sky-300">Start Line (Bottom-Left)</div>
-            </div>
-            <div class="hidden md:block h-8 w-px bg-slate-700"></div>
-            <div class="hidden md:block">
-                <div id="penaltyConfigBadge" class="text-[11px] font-bold text-slate-300 mono">RRS D1.3: 1-Turn (360°)</div>
-                <div id="windSummaryBadge" class="text-[11px] font-bold text-emerald-300 mono">TWD 000° • 12.0 kt</div>
-            </div>
-        </div>
-
-        <!-- Center: Live 3v3 Team Combination & Play Callout Scoreboard -->
-        <div class="hud-panel rounded-xl px-4 py-2 flex items-center gap-4 pointer-events-auto">
-            <div class="text-center">
-                <div class="text-[10px] font-extrabold uppercase text-blue-400">BLUE TEAM</div>
-                <div id="bluePlacesDisplay" class="mono text-sm sm:text-base font-extrabold text-white">1-2-3 (6)</div>
-                <div id="bluePlayBadge" class="mono text-[10px] font-bold text-sky-300">PLAY 1-D</div>
-            </div>
-            <div class="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-center">
-                <div id="winningTeamBadge" class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">BLUE WINNING</div>
-                <div id="activePlayCallout" class="mono text-[11px] font-bold text-amber-300">123 vs 456</div>
-            </div>
-            <div class="text-center">
-                <div class="text-[10px] font-extrabold uppercase text-rose-400">RED TEAM</div>
-                <div id="redPlacesDisplay" class="mono text-sm sm:text-base font-extrabold text-white">4-5-6 (15)</div>
-                <div id="redPlayBadge" class="mono text-[10px] font-bold text-rose-300">CHASE</div>
-            </div>
-        </div>
-
-        <!-- Right: Camera, Zoom, Overlays & Start Screen Button -->
-        <div class="hud-panel rounded-xl px-3 py-2 flex items-center gap-1.5 pointer-events-auto">
-            <button id="zoomOutBtn" title="Zoom Out (-)" class="btn-game px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-extrabold mono border border-slate-700">-</button>
-            <span id="zoomPctLabel" class="mono text-xs font-bold text-sky-300 w-12 text-center">85%</span>
-            <button id="zoomInBtn" title="Zoom In (+)" class="btn-game px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-extrabold mono border border-slate-700">+</button>
-            <button id="camToggleBtn" class="btn-game px-2.5 py-1.5 rounded-lg bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 border border-sky-500/40 text-xs font-bold">
+    <!-- Top-Right Corner: Camera, Zoom, Menu & Compact 3v3 Combination Card -->
+    <div class="fixed top-2.5 right-2.5 z-20 flex flex-col items-end gap-1.5 pointer-events-none">
+        <!-- Camera & Menu Controls -->
+        <div class="hud-panel rounded-xl px-2.5 py-1.5 flex items-center gap-1.5 pointer-events-auto">
+            <button id="zoomOutBtn" title="Zoom Out (-)" class="btn-game px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-extrabold mono border border-slate-700/70">-</button>
+            <span id="zoomPctLabel" class="mono text-[11px] font-bold text-sky-300 w-10 text-center">85%</span>
+            <button id="zoomInBtn" title="Zoom In (+)" class="btn-game px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-extrabold mono border border-slate-700/70">+</button>
+            <button id="camToggleBtn" class="btn-game px-2.5 py-1 rounded-lg bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 border border-sky-500/40 text-[11px] font-bold">
                 Cam: Follow (Z)
             </button>
-            <button id="overlayToggleBtn" class="btn-game hidden sm:inline-flex px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold">
+            <button id="overlayToggleBtn" class="btn-game hidden sm:inline-flex px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/70 text-[11px] font-bold">
                 Zones: ON
             </button>
-            <button id="openMenuBtn" class="btn-game px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1">
-                <i class="fa-solid fa-sliders"></i> <span class="hidden sm:inline">Start Screen</span>
+            <button id="openMenuBtn" class="btn-game px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1">
+                <i class="fa-solid fa-sliders"></i> <span class="hidden sm:inline">Menu</span>
             </button>
+        </div>
+
+        <!-- Side 3v3 Scoreboard Card -->
+        <div class="hud-panel rounded-xl px-3 py-2 flex items-center gap-3 pointer-events-auto">
+            <div class="text-center">
+                <div class="text-[9px] font-extrabold uppercase text-blue-400">BLUE</div>
+                <div id="bluePlacesDisplay" class="mono text-xs sm:text-sm font-extrabold text-white">1-2-3 (6)</div>
+                <div id="bluePlayBadge" class="mono text-[9px] font-bold text-sky-300">PLAY 1-D</div>
+            </div>
+            <div class="px-2 py-0.5 rounded-lg bg-slate-950/60 border border-slate-700/70 text-center">
+                <div id="winningTeamBadge" class="text-[9px] font-extrabold uppercase tracking-wider text-emerald-400">BLUE LEAD</div>
+                <div id="activePlayCallout" class="mono text-[10px] font-bold text-amber-300">123 vs 456</div>
+            </div>
+            <div class="text-center">
+                <div class="text-[9px] font-extrabold uppercase text-rose-400">RED</div>
+                <div id="redPlacesDisplay" class="mono text-xs sm:text-sm font-extrabold text-white">4-5-6 (15)</div>
+                <div id="redPlayBadge" class="mono text-[9px] font-bold text-rose-300">CHASE</div>
+            </div>
         </div>
     </div>
 
-    <!-- LEFT TELEMETRY & TEAM PLAYBOOK MATRIX FEED -->
-    <div class="fixed left-2 bottom-20 z-20 hidden lg:flex flex-col gap-2 w-80 pointer-events-none">
-        <div class="hud-panel rounded-xl p-3 pointer-events-auto space-y-2">
-            <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                <span class="text-[11px] font-extrabold uppercase tracking-wider text-emerald-400">
-                    <i class="fa-solid fa-chess-board mr-1"></i> Live 3v3 Playbook & Maneuvers
+    <!-- BOTTOM-LEFT TELEMETRY & TEAM PLAYBOOK MATRIX FEED -->
+    <div class="fixed left-2.5 bottom-16 z-20 hidden lg:flex flex-col gap-1.5 w-72 pointer-events-none">
+        <div class="hud-panel rounded-xl p-2.5 pointer-events-auto space-y-1.5">
+            <div class="flex items-center justify-between border-b border-slate-800/80 pb-1">
+                <span class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">
+                    <i class="fa-solid fa-diagram-project mr-1"></i> 3v3 Playbook &amp; Trios
                 </span>
-                <span id="mpLiveBadge" class="text-[10px] mono font-bold text-slate-400">SOLO / BOT AI</span>
+                <span id="mpLiveBadge" class="text-[9px] mono font-bold px-1.5 py-0.5 rounded bg-slate-800/80 text-sky-300">SOLO AI</span>
             </div>
-            <div id="liveJobsMatrix" class="grid grid-cols-2 gap-1.5 text-[10px] mono"></div>
-            <div class="border-t border-slate-800 pt-1.5">
-                <div class="text-[10px] font-extrabold uppercase tracking-wider text-sky-400 mb-1">
-                    <i class="fa-solid fa-scale-balanced mr-1"></i> RRS 2025–2028 & Team Radio
-                </div>
-                <div id="tacticalFeed" class="space-y-1 max-h-24 overflow-y-auto text-[11px] font-medium text-slate-300 pr-1"></div>
+            <div id="activeCoordinatedPlaysBox" class="bg-slate-950/55 rounded-lg px-2 py-1 border border-slate-800/70 text-[9px] mono space-y-0.5">
+                <div class="text-slate-400">Scanning for Pass-Back &amp; Mark Trap Trios...</div>
+            </div>
+            <div id="liveJobsMatrix" class="grid grid-cols-2 gap-1 text-[9px] mono"></div>
+            <div class="border-t border-slate-800/80 pt-1">
+                <div id="tacticalFeed" class="space-y-0.5 max-h-14 overflow-y-auto text-[10px] font-medium text-slate-300 pr-1"></div>
             </div>
         </div>
     </div>
 
     <!-- BOTTOM CONTROLS & BOAT TELEMETRY BAR -->
-    <div class="fixed bottom-2 left-2 right-2 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+    <div class="fixed bottom-2.5 left-2.5 right-2.5 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
         <!-- Player Boat Telemetry -->
-        <div class="hud-panel rounded-xl px-3.5 py-2 flex items-center gap-3 pointer-events-auto">
+        <div class="hud-panel rounded-xl px-3 py-1.5 flex items-center gap-2.5 pointer-events-auto">
             <div>
-                <div class="text-[10px] font-bold uppercase text-slate-400">Helm / Job</div>
-                <div id="hudHelmId" class="mono text-sm sm:text-base font-extrabold text-blue-400">B1 (#1 • COVER)</div>
+                <div class="text-[9px] font-bold uppercase text-slate-400">Helm / Job</div>
+                <div id="hudHelmId" class="mono text-xs sm:text-sm font-extrabold text-blue-400">B1 (#1 • COVER)</div>
             </div>
-            <div class="h-7 w-px bg-slate-700"></div>
+            <div class="h-6 w-px bg-slate-700/70"></div>
             <div>
-                <div class="text-[10px] font-bold uppercase text-slate-400">Speed</div>
-                <div id="hudSpeed" class="mono text-sm sm:text-base font-extrabold text-white">5.8 kt</div>
+                <div class="text-[9px] font-bold uppercase text-slate-400">Speed</div>
+                <div id="hudSpeed" class="mono text-xs sm:text-sm font-extrabold text-white">5.8 kt</div>
             </div>
-            <div class="h-7 w-px bg-slate-700"></div>
+            <div class="h-6 w-px bg-slate-700/70"></div>
             <div>
-                <div class="text-[10px] font-bold uppercase text-slate-400">Tack / TWA</div>
-                <div id="hudTackTwa" class="mono text-xs sm:text-sm font-extrabold text-emerald-400">STBD • 42°</div>
+                <div class="text-[9px] font-bold uppercase text-slate-400">Tack / TWA</div>
+                <div id="hudTackTwa" class="mono text-xs font-extrabold text-emerald-400">STBD • 42°</div>
             </div>
-            <div class="hidden sm:block h-7 w-px bg-slate-700"></div>
+            <div class="hidden sm:block h-6 w-px bg-slate-700/70"></div>
             <div class="hidden sm:block">
-                <div class="text-[10px] font-bold uppercase text-slate-400">RRS Status / Air</div>
-                <div id="hudAirStatus" class="mono text-xs font-extrabold text-sky-300">CLEAR AIR</div>
+                <div class="text-[9px] font-bold uppercase text-slate-400">RRS / Air</div>
+                <div id="hudAirStatus" class="mono text-[11px] font-extrabold text-sky-300">CLEAR AIR</div>
             </div>
         </div>
 
         <!-- Interactive Helm Controls -->
-        <div class="hud-panel rounded-xl px-2.5 py-1.5 flex flex-wrap items-center gap-1.5 pointer-events-auto">
-            <button id="btnHeadUp" class="btn-game px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-sky-600 text-white font-bold text-xs border border-slate-700">
-                <span class="mono text-sky-400 font-extrabold">[W]</span> Head Up
+        <div class="hud-panel rounded-xl px-2 py-1 flex flex-wrap items-center gap-1 pointer-events-auto">
+            <button id="btnTurnLeft" class="btn-game px-2 py-1.5 rounded-lg bg-slate-800/75 hover:bg-slate-700 active:bg-sky-600 text-white font-bold text-[11px] border border-slate-700/70" title="Turn Counterclockwise (Port)">
+                <span class="mono text-sky-400 font-extrabold">[A]</span> &#8634;
             </button>
-            <button id="btnBearAway" class="btn-game px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-sky-600 text-white font-bold text-xs border border-slate-700">
-                <span class="mono text-sky-400 font-extrabold">[S]</span> Head Down
+            <button id="btnTurnRight" class="btn-game px-2 py-1.5 rounded-lg bg-slate-800/75 hover:bg-slate-700 active:bg-sky-600 text-white font-bold text-[11px] border border-slate-700/70" title="Turn Clockwise (Starboard)">
+                <span class="mono text-sky-400 font-extrabold">[D]</span> &#8635;
             </button>
-            <button id="btnLuff" class="btn-game px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-amber-600 text-white font-bold text-xs border border-slate-700">
-                <span class="mono text-amber-400 font-extrabold">[Shift]</span> Luff Sails
+            <button id="btnHeadUp" class="btn-game px-2.5 py-1.5 rounded-lg bg-slate-800/75 hover:bg-slate-700 active:bg-sky-600 text-white font-bold text-[11px] border border-slate-700/70">
+                <span class="mono text-sky-400 font-extrabold">[W]</span> Up
             </button>
-            <button id="btnTack" class="btn-game px-3 py-2 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 text-blue-200 font-bold text-xs border border-blue-500/40">
+            <button id="btnBearAway" class="btn-game px-2.5 py-1.5 rounded-lg bg-slate-800/75 hover:bg-slate-700 active:bg-sky-600 text-white font-bold text-[11px] border border-slate-700/70">
+                <span class="mono text-sky-400 font-extrabold">[S]</span> Down
+            </button>
+            <button id="btnLuff" class="btn-game px-2.5 py-1.5 rounded-lg bg-slate-800/75 hover:bg-slate-700 active:bg-amber-600 text-white font-bold text-[11px] border border-slate-700/70">
+                <span class="mono text-amber-400 font-extrabold">[Shift]</span> Luff
+            </button>
+            <button id="btnTack" class="btn-game px-2.5 py-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 text-blue-200 font-bold text-[11px] border border-blue-500/40">
                 <span class="mono text-blue-300 font-extrabold">[T]</span> Tack
             </button>
-            <button id="btnGybe" class="btn-game px-3 py-2 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 font-bold text-xs border border-indigo-500/40">
+            <button id="btnGybe" class="btn-game px-2.5 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 font-bold text-[11px] border border-indigo-500/40">
                 <span class="mono text-indigo-300 font-extrabold">[G]</span> Gybe
             </button>
-            <button id="btnPenalty" class="btn-game px-3 py-2 rounded-lg bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 font-bold text-xs border border-rose-500/40">
+            <button id="btnPenalty" class="btn-game px-2.5 py-1.5 rounded-lg bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 font-bold text-[11px] border border-rose-500/40">
                 <span class="mono text-rose-300 font-extrabold">[P]</span> <span id="btnPenaltyLabel">Spin 360°</span>
             </button>
         </div>
     </div>
 
-    <!-- START SCREEN & MULTIPLAYER PARTY MODAL -->
-    <div id="startModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 overflow-y-auto">
-        <div class="hud-panel w-full max-w-4xl rounded-2xl p-5 sm:p-6 border border-sky-500/30 space-y-4 my-auto max-h-[95vh] overflow-y-auto">
-            <!-- Header -->
-            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+    <!-- CLEAN, TABBED START SCREEN MODAL (SINGLEPLAYER vs MULTIPLAYER PARTY) -->
+    <div id="startModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-3 overflow-y-auto">
+        <div class="hud-panel w-full max-w-3xl rounded-2xl p-5 sm:p-6 border border-sky-500/40 space-y-5 my-auto shadow-2xl">
+            <!-- Header + Assigned Boat Pill -->
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
                 <div>
-                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/15 border border-sky-400/30 text-sky-300 text-xs font-extrabold uppercase tracking-wider mb-1">
-                        <i class="fa-solid fa-sailboat"></i> 2025–2028 RRS & Appendix D Team Racing
+                    <div class="text-[11px] font-extrabold uppercase tracking-wider text-sky-400 mb-0.5">
+                        <i class="fa-solid fa-sailboat mr-1"></i> 3v3 Digital N Simulator
                     </div>
-                    <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">C420 Team Racing Simulator</h1>
-                    <p class="text-xs sm:text-sm text-slate-400">Digital N Course • Physical Maneuver Execution • Rigid-Body Hull Collisions • Cross-Device Party</p>
+                    <h1 class="text-2xl font-extrabold tracking-tight text-white">C420 Team Racing</h1>
                 </div>
-                <div class="text-right">
-                    <div class="text-xs font-bold text-slate-400 uppercase">You Helm</div>
-                    <div id="selectedBoatHeaderBadge" class="text-lg font-extrabold text-blue-400 mono">BLUE (B1)</div>
-                    <div id="mpUserIdDisplay" class="text-[10px] text-emerald-400 mono">Connecting Global Relay...</div>
+                <div class="flex items-center gap-3 bg-slate-900/90 px-3.5 py-2 rounded-xl border border-slate-800">
+                    <div>
+                        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Your Helm</div>
+                        <div id="selectedBoatHeaderBadge" class="text-sm font-extrabold text-blue-400 mono">BLUE (B1)</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- MULTIPLAYER PARTY SYSTEM PANEL -->
-            <div class="bg-slate-900/95 rounded-xl p-4 border border-sky-500/30 space-y-3">
+            <!-- Mode Switcher Tabs: Singleplayer vs Multiplayer Party -->
+            <div class="grid grid-cols-2 gap-2 bg-slate-900/95 p-1.5 rounded-xl border border-slate-800">
+                <button type="button" id="tabSingleplayerBtn" class="py-2.5 px-4 rounded-lg font-extrabold text-xs sm:text-sm transition flex items-center justify-center gap-2 bg-sky-600 text-white shadow">
+                    <i class="fa-solid fa-user"></i> Singleplayer (vs Bots)
+                </button>
+                <button type="button" id="tabMultiplayerBtn" class="py-2.5 px-4 rounded-lg font-extrabold text-xs sm:text-sm transition flex items-center justify-center gap-2 text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-users"></i> Multiplayer Party (3v3)
+                </button>
+            </div>
+
+            <!-- TAB 1: SINGLEPLAYER PANE -->
+            <div id="singleplayerPane" class="bg-slate-900/80 rounded-xl p-4 border border-slate-800 space-y-3">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="text-xs font-extrabold uppercase tracking-wider text-amber-300">Choose Your Starting Boat</div>
+                        <div class="text-[11px] text-slate-400">Pick any Blue or Red position on the starting line; AI bots will sail the other 5 boats.</div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 sm:grid-cols-6 gap-2 pt-1" id="soloBoatPickerGroup">
+                    <button type="button" data-pick-boat="B1" class="solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border border-blue-400 bg-blue-600 text-white">B1 (Pin)</button>
+                    <button type="button" data-pick-boat="B2" class="solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border border-blue-500/40 bg-blue-950/50 text-blue-300 hover:bg-blue-900/60">B2 (Mid)</button>
+                    <button type="button" data-pick-boat="B3" class="solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border border-blue-500/40 bg-blue-950/50 text-blue-300 hover:bg-blue-900/60">B3 (RC)</button>
+                    <button type="button" data-pick-boat="R1" class="solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border border-rose-500/40 bg-rose-950/50 text-rose-300 hover:bg-rose-900/60">R1 (Pin)</button>
+                    <button type="button" data-pick-boat="R2" class="solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border border-rose-500/40 bg-rose-950/50 text-rose-300 hover:bg-rose-900/60">R2 (Mid)</button>
+                    <button type="button" data-pick-boat="R3" class="solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border border-rose-500/40 bg-rose-950/50 text-rose-300 hover:bg-rose-900/60">R3 (RC)</button>
+                </div>
+            </div>
+
+            <!-- TAB 2: MULTIPLAYER PARTY PANE -->
+            <div id="multiplayerPane" class="hidden bg-slate-900/90 rounded-xl p-4 border border-sky-500/30 space-y-3">
                 <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
                     <div class="flex items-center gap-2">
                         <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" id="mpStatusDot"></span>
-                        <span class="text-xs font-extrabold uppercase tracking-wider text-sky-300">
-                            <i class="fa-solid fa-users mr-1"></i> Cross-Device 3v3 Party System
-                        </span>
+                        <span id="mpUserIdDisplay" class="text-[11px] font-bold text-emerald-400 mono">Online Relay Ready</span>
                         <span id="mpCurrentRoomBadge" class="hidden px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40 text-sky-300 font-bold mono text-xs"></span>
                     </div>
                     <div class="flex items-center gap-2">
@@ -252,21 +289,20 @@
 
                 <!-- Browser / Create / Join Controls (shown when not in a party) -->
                 <div id="mpLobbyBrowser" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <!-- Create or Join by Code -->
                     <div class="bg-slate-950/70 p-3 rounded-lg border border-slate-800 space-y-2.5">
-                        <div class="text-[11px] font-extrabold uppercase text-slate-300">Host or Join Party Across Any Device</div>
+                        <div class="text-[11px] font-extrabold uppercase text-slate-300">Host or Join by Room Code</div>
                         <div class="flex flex-wrap items-center gap-2">
                             <button id="createPublicPartyBtn" class="btn-game flex-1 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5">
-                                <i class="fa-solid fa-earth-americas"></i> Host Public Party
+                                <i class="fa-solid fa-earth-americas"></i> Host Public
                             </button>
                             <button id="createPrivatePartyBtn" class="btn-game flex-1 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5">
-                                <i class="fa-solid fa-lock"></i> Host Private Party
+                                <i class="fa-solid fa-lock"></i> Host Private
                             </button>
                         </div>
                         <div class="flex items-center gap-1.5 pt-1">
-                            <input id="joinCodeInput" type="text" maxlength="6" placeholder="ENTER 6-CHAR CODE" class="uppercase mono bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-300 flex-1 focus:outline-none focus:border-amber-400" />
+                            <input id="joinCodeInput" type="text" maxlength="6" placeholder="ROOM CODE" class="uppercase mono bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-300 flex-1 focus:outline-none focus:border-amber-400" />
                             <button id="joinByCodeBtn" class="btn-game px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs">
-                                Join Code
+                                Join
                             </button>
                         </div>
                     </div>
@@ -274,11 +310,11 @@
                     <!-- Public Parties List -->
                     <div class="bg-slate-950/70 p-3 rounded-lg border border-slate-800 flex flex-col justify-between">
                         <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[11px] font-extrabold uppercase text-emerald-400"><i class="fa-solid fa-satellite-dish mr-1"></i> Open Public Parties</span>
+                            <span class="text-[11px] font-extrabold uppercase text-emerald-400">Open Public Parties</span>
                             <span id="publicPartiesCount" class="text-[10px] mono text-slate-400">0 Active</span>
                         </div>
                         <div id="publicPartiesList" class="space-y-1.5 max-h-28 overflow-y-auto text-xs pr-1">
-                            <div class="text-slate-500 text-[11px] italic py-2 text-center">No public parties open yet. Click "Host Public Party" or play solo!</div>
+                            <div class="text-slate-500 text-[11px] italic py-2 text-center">No public parties open yet.</div>
                         </div>
                     </div>
                 </div>
@@ -288,20 +324,20 @@
                     <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-lg border border-slate-800">
                         <div class="flex items-center gap-2 flex-wrap">
                             <span id="partyPrivacyTag" class="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">PUBLIC</span>
-                            <span class="text-xs text-slate-300 font-semibold">Party Code:</span>
+                            <span class="text-xs text-slate-300 font-semibold">Code:</span>
                             <span id="partyCodeDisplay" class="mono text-sm font-extrabold text-amber-300 tracking-wider bg-slate-800 px-2 py-0.5 rounded border border-slate-700">------</span>
                             <button id="copyPartyCodeBtn" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-sky-300 border border-slate-700 font-semibold">
-                                <i class="fa-regular fa-copy mr-1"></i>Copy
+                                Copy
                             </button>
-                            <span id="partySyncBadge" class="text-[10px] mono font-bold text-emerald-400 ml-1">● Live Sync</span>
+                            <span id="partySyncBadge" class="text-[10px] mono font-bold text-emerald-400 ml-1">● Live</span>
                         </div>
                         <div class="flex items-center gap-3">
                             <label class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-200 cursor-pointer">
                                 <input type="checkbox" id="partyFillBotsToggle" checked class="rounded bg-slate-800 border-slate-600 text-sky-500 focus:ring-0" />
-                                <span>Fill Empty Boats with AI Bots</span>
+                                <span>Fill Empty Slots with Bots</span>
                             </label>
                             <button id="leavePartyBtn" class="px-2.5 py-1 rounded bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border border-rose-500/40 text-xs font-bold">
-                                Leave Party
+                                Leave
                             </button>
                         </div>
                     </div>
@@ -311,72 +347,59 @@
                 </div>
             </div>
 
-            <!-- Customization Settings Grid -->
+            <!-- Race Settings Row -->
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div class="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800">
-                    <label class="block text-xs font-extrabold uppercase tracking-wider text-sky-400 mb-1.5">
-                        <i class="fa-regular fa-clock mr-1"></i> Start Sequence Length
+                <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                    <label class="block text-[11px] font-extrabold uppercase tracking-wider text-sky-400 mb-1">
+                        Start Countdown
                     </label>
-                    <select id="selectStartLength" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-sky-400">
-                        <option value="10">10 Seconds (Quick Start)</option>
+                    <select id="selectStartLength" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-sky-400">
+                        <option value="10">10 Seconds (Quick)</option>
                         <option value="30" selected>30 Seconds (Standard)</option>
-                        <option value="60">1 Minute (Tactical Pre-Start)</option>
-                        <option value="180">3 Minutes (Full College Sequence)</option>
+                        <option value="60">1 Minute</option>
+                        <option value="180">3 Minutes (Full)</option>
                     </select>
                 </div>
 
-                <div class="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800">
-                    <label class="block text-xs font-extrabold uppercase tracking-wider text-amber-400 mb-1.5">
-                        <i class="fa-solid fa-rotate mr-1"></i> Exoneration Penalty Turns
+                <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                    <label class="block text-[11px] font-extrabold uppercase tracking-wider text-amber-400 mb-1">
+                        Penalty Turns
                     </label>
-                    <select id="selectPenaltyTurns" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-amber-400">
-                        <option value="1" selected>1-Turn Penalty (360° RRS D1.3 Team Race)</option>
-                        <option value="2">2-Turn Penalty (720° RRS 44.1 Fleet/Umpired)</option>
+                    <select id="selectPenaltyTurns" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-amber-400">
+                        <option value="1" selected>1-Turn (360° Team Race)</option>
+                        <option value="2">2-Turn (720° Fleet)</option>
                     </select>
                 </div>
 
-                <div class="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800">
-                    <label class="block text-xs font-extrabold uppercase tracking-wider text-emerald-400 mb-1.5">
-                        <i class="fa-solid fa-wind mr-1"></i> Breeze & Puffs Condition
+                <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                    <label class="block text-[11px] font-extrabold uppercase tracking-wider text-emerald-400 mb-1">
+                        Wind Conditions
                     </label>
-                    <select id="selectWindMode" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-emerald-400">
-                        <option value="shifty" selected>12–15 kt Oscillating + Cat's-Paw Puffs</option>
-                        <option value="puffy">10–18 kt Heavy Puffs & Glassy Lulls</option>
-                        <option value="planing">16–20 kt Planing Reach Conditions</option>
+                    <select id="selectWindMode" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-emerald-400">
+                        <option value="shifty" selected>12–15 kt Shifty + Puffs</option>
+                        <option value="puffy">10–18 kt Heavy Puffs</option>
+                        <option value="planing">16–20 kt Planing Breeze</option>
                     </select>
                 </div>
             </div>
 
-            <!-- Controls & RRS Reference -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div class="bg-slate-900/75 p-3.5 rounded-xl border border-slate-800/90 space-y-1.5">
-                    <div class="font-extrabold uppercase text-slate-300 tracking-wider mb-1">
-                        <i class="fa-solid fa-keyboard text-sky-400 mr-1"></i> Helm Controls
-                    </div>
-                    <div class="grid grid-cols-2 gap-1.5 text-slate-300">
-                        <div><span class="mono font-bold text-sky-400">[W]</span> Head Up (Pinch/Luff)</div>
-                        <div><span class="mono font-bold text-sky-400">[S]</span> Head Down (Foot/Bear Off)</div>
-                        <div><span class="mono font-bold text-blue-400">[T]</span> Tack Across Wind</div>
-                        <div><span class="mono font-bold text-indigo-400">[G]</span> Gybe Across Stern</div>
-                        <div><span class="mono font-bold text-amber-400">[Shift]</span> Luff / Brake Sails</div>
-                        <div><span class="mono font-bold text-rose-400">[P]</span> Penalty Turn (Tack+Gybe)</div>
-                    </div>
+            <!-- Compact Controls Bar + Launch Button -->
+            <div class="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-800">
+                <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mono">
+                    <span><strong class="text-sky-400">[A/D]</strong> Turn CCW/CW</span>
+                    <span>•</span>
+                    <span><strong class="text-sky-400">[W/S]</strong> Up/Down</span>
+                    <span>•</span>
+                    <span><strong class="text-blue-400">[T]</strong> Tack</span>
+                    <span>•</span>
+                    <span><strong class="text-indigo-400">[G]</strong> Gybe</span>
+                    <span>•</span>
+                    <span><strong class="text-amber-400">[Shift]</strong> Luff</span>
+                    <span>•</span>
+                    <span><strong class="text-rose-400">[P]</strong> Spin</span>
                 </div>
-
-                <div class="bg-slate-900/75 p-3.5 rounded-xl border border-slate-800/90 space-y-1.5">
-                    <div class="font-extrabold uppercase text-slate-300 tracking-wider mb-1">
-                        <i class="fa-solid fa-scale-balanced text-emerald-400 mr-1"></i> Physical Maneuver State Machine & Hull Physics
-                    </div>
-                    <p class="text-slate-400 leading-relaxed">
-                        Bots execute multi-stage <strong class="text-slate-200">Pinning</strong> (bearing away to windward hip, matching speed, pinching to luff), <strong class="text-slate-200">Mark Traps</strong> (M1 Stbd Hook, M2 Offset Dip, M3 Power-Angle, M4 Inside Lock), <strong class="text-slate-200">Pass-Backs</strong>, and <strong class="text-slate-200">OBB Hull Collisions</strong> with rotational bow/stern lever torque!
-                    </p>
-                </div>
-            </div>
-
-            <!-- Launch Button -->
-            <div class="flex items-center justify-end gap-3 pt-1">
-                <button id="startRaceBtn" class="btn-game w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-extrabold text-sm sm:text-base tracking-wide border border-sky-300/40 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-flag-checkered"></i> <span id="startRaceBtnLabel">Launch Race</span>
+                <button id="startRaceBtn" class="btn-game w-full sm:w-auto px-8 py-3 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-extrabold text-sm tracking-wide border border-sky-300/40 flex items-center justify-center gap-2 shadow-lg">
+                    <i class="fa-solid fa-flag-checkered"></i> <span id="startRaceBtnLabel">Start Race</span>
                 </button>
             </div>
         </div>
@@ -478,6 +501,8 @@
             running: false,
             phase: 'PRESTART',
             timer: 30,
+            finishWindowTimer: null,
+            finishReason: '',
             lastTime: performance.now(),
             baseWindDir: 0,
             baseWindSpeed: 13,
@@ -495,6 +520,7 @@
                 BLUE: { callout: 'PAIRS', desc: 'Win Your Pair', winning: true },
                 RED:  { callout: 'PAIRS', desc: 'Win Your Pair', winning: false },
                 jobsByBoatId: {},
+                activeTrios: [],
                 lastCalloutKey: ''
             },
             camera: { x: 770, y: 2150, zoom: 0.85 }
@@ -503,6 +529,8 @@
         const keys = {
             up: false,
             down: false,
+            left: false,
+            right: false,
             luff: false
         };
 
@@ -973,48 +1001,266 @@
             } else if (winRanks === '134') {
                 const dist1to2 = distBetween(byPlace[1], byPlace[2]);
                 const dist2to3 = distBetween(byPlace[2], byPlace[3]);
+                const dist3to4 = distBetween(byPlace[3], byPlace[4]);
                 const dist4to5 = distBetween(byPlace[4], byPlace[5]);
-                const nearMark = [COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4].some(m => distBetween(byPlace[1], m) < THREE_BL_RADIUS * 1.6);
 
-                const playOffense1A = (nearMark || dist1to2 < 135 || dist2to3 < 125) && !(byPlace[1].leg === 5 && dist4to5 > 230);
+                const playDefense3D = (dist3to4 > 195) || (dist4to5 > 215) || (lastHalfOfLastLeg && dist4to5 > 110);
 
-                if (playOffense1A) {
-                    winCallout = 'PLAY 1-A';
-                    loseCallout = 'CHASE';
-                    assign(1, 'ATTACK', 2, 3, 'PLAY 1-A: TRAP #2 -> ADVANCE #3', 'PASSBACK_EXEC');
-                    assign(2, 'ESCAPE', 1, 3, 'DO UNTO OTHERS: TRAP 3&4!', 'ESCAPE_OR_ATTACK');
-                    assign(3, 'PASS', 2, 1, 'PLAY 1-A: PASS #2 INTO 1-2!', 'PASS_BENEFICIARY');
-                    assign(4, 'COVER', 5, 3, 'PLAY 1-A: DEFEND VS 5&6', 'TIGHT_COVER');
-                    assign(5, 'CHASE', 4, 6, 'CHASE: HIGH-LOW #4', 'HIGH_LOW_HIGH');
-                    assign(6, 'CHASE', 4, 5, 'CHASE: SPLIT PASS #4', 'HIGH_LOW_LOW');
-                } else {
+                if (playDefense3D) {
                     winCallout = 'PLAY 3-D';
                     loseCallout = 'CHASE';
-                    assign(1, 'COVER', 2, 3, 'PLAY 3-D: PIGGY-IN-MIDDLE #2', 'PIGGY_GUARD');
-                    assign(2, 'ATTACK', 3, 5, 'DILEMMA #2: TWOFUR 3&4 AT MARK', 'TRAP_DOUBLE');
-                    assign(3, 'COVER', 5, 4, 'PLAY 3-D: COVER #5', 'TIGHT_COVER');
-                    assign(4, 'COVER', 5, 3, 'PLAY 3-D: COVER #5/#6', 'TIGHT_COVER');
-                    assign(5, 'CHASE', 4, 6, 'CHASE: SPLIT TO PASS #4', 'HIGH_LOW_HIGH');
-                    assign(6, 'CHASE', 4, 5, 'CHASE: SPLIT TO PASS #4', 'HIGH_LOW_LOW');
+                    assign(1, 'COVER', 2, 3, 'PLAY 3-D: STAY CLOSER TO #2 (PIGGY)', 'PIGGY_GUARD');
+                    assign(2, 'ATTACK', 3, 5, '256: COMPRESSION MARK TRAP ON 3&4', 'TRAP_DOUBLE');
+                    assign(3, 'COVER', 5, 4, 'PLAY 3-D: COVER/BALANCE 5&6', 'LOOSE_COVER');
+                    assign(4, 'COVER', 5, 3, 'PLAY 3-D: COVER #5', 'TIGHT_COVER');
+                    assign(5, 'CHASE', 4, 6, 'CHASE: SPLIT/PASS #4', 'HIGH_LOW_HIGH');
+                    assign(6, 'CHASE', 4, 5, 'CHASE: SPLIT/PASS #4', 'HIGH_LOW_LOW');
+                } else {
+                    winCallout = 'PLAY 1-A';
+                    loseCallout = 'CHASE';
+                    assign(1, 'ATTACK', 2, 3, 'PLAY 1-A: TRAP/SLOW #2 -> PASS #3', 'PASSBACK_EXEC');
+                    assign(2, 'ESCAPE', 1, 3, 'DILEMMA OF #2: ESCAPE #1 / TRAP 3&4', 'ESCAPE_OR_ATTACK');
+                    assign(3, 'PASS', 2, 1, 'PLAY 1-A: PASS #2 INTO 1-2!', 'PASS_BENEFICIARY');
+                    assign(4, 'COVER', 5, 3, 'PLAY 1-A: DEFEND AGAINST #5', 'TIGHT_COVER');
+                    assign(5, 'CHASE', 4, 6, 'CHASE: HIGH-LOW #4', 'HIGH_LOW_HIGH');
+                    assign(6, 'CHASE', 4, 5, 'CHASE: DOUBLE BLANKET #4', 'HIGH_LOW_LOW');
                 }
             }
 
+            // CLINCH SPRINT OVERRIDE FOR 1-2 AND 1-3 COMBINATIONS (ANYWHERE ON THE COURSE):
+            // Whenever a team holds a 1-2x (123, 124, 125, 126) or 1-3x (134, 135, 136) combination on ANY leg (Legs 1–5),
+            // those front boats (#1 & #2 in 1-2x, or #1 & #3 in 1-3x) immediately enter pure FLEET-RACE CLINCH SPRINT mode!
+            // They never slow down, never wait to trap, and race around the course at maximum VMG to cross the finish line first.
+            const is12Combo = (byPlace[1]?.team && byPlace[1]?.team === byPlace[2]?.team && byPlace[1].leg >= 1);
+            const is13Combo = (byPlace[1]?.team && byPlace[1]?.team === byPlace[3]?.team && byPlace[1]?.team !== byPlace[2]?.team && byPlace[1].leg >= 1);
+
+            if (is12Combo) {
+                const sprintTeam = byPlace[1].team;
+                if (gameState.playbookState[sprintTeam]) {
+                    gameState.playbookState[sprintTeam].callout = 'FLEET RACE 1-2';
+                }
+                for (const place of [1, 2]) {
+                    const b = byPlace[place];
+                    if (b && !b.finished) {
+                        jobs[b.id] = {
+                            job: 'CHASE',
+                            targetId: null,
+                            helperId: byPlace[place === 1 ? 2 : 1]?.id || null,
+                            detail: `1-2 FLEET RACE: MAX SPEED TO FINISH (#${place})!`,
+                            mode: 'CLINCH_SPRINT',
+                            place
+                        };
+                    }
+                }
+            } else if (is13Combo) {
+                const sprintTeam = byPlace[1].team;
+                if (gameState.playbookState[sprintTeam]) {
+                    gameState.playbookState[sprintTeam].callout = 'FLEET RACE 1-3';
+                }
+                for (const place of [1, 3]) {
+                    const b = byPlace[place];
+                    if (b && !b.finished) {
+                        jobs[b.id] = {
+                            job: 'CHASE',
+                            targetId: place === 3 ? (byPlace[2]?.id || null) : null,
+                            helperId: byPlace[place === 1 ? 3 : 1]?.id || null,
+                            detail: `1-3 FLEET RACE: MAX SPEED TO FINISH (#${place})!`,
+                            mode: 'CLINCH_SPRINT',
+                            place
+                        };
+                    }
+                }
+            }
+
+            // Proactive Mark-Trap & Open-Course Pass-Back Trio Coordinator:
+            // Scans all 6 boats for synchronized 3-boat trios: [Executor Teammate] ahead of [Victim Opponent] ahead of [Beneficiary Teammate].
+            // Links them together so the Executor slows/traps the Victim until the Beneficiary physically completes the pass!
+            const activeTrios = [];
+            for (let p = 1; p <= 5; p++) {
+                const executor = byPlace[p];
+                const victim = byPlace[p + 1];
+                if (!executor || !victim || executor.finished || victim.finished) continue;
+                if (executor.team === victim.team) continue;
+                if (executor.leg !== victim.leg || executor.leg < 1) continue;
+
+                // Never pull a boat out of CLINCH_SPRINT mode (1-2 or 1-3 Fleet Race) to slow down!
+                if (jobs[executor.id]?.mode === 'CLINCH_SPRINT') continue;
+
+                // Find the closest trailing teammate behind the victim (within 2 places)
+                const beneficiary = sortedBoats.slice(p + 1).find(b => b.team === executor.team && !b.finished && Math.abs(b.leg - victim.leg) <= 1);
+                const is3In123 = (p === 3 && winRanks === '123' && executor.team === winTeam);
+                const is1In156 = (p === 1 && loseRanks === '156' && executor.team === loseTeam);
+
+                // Don't risk #1 or #2 if they already have a 1-2 combo, or #1/#3 if they have a 1-3 combo
+                if (is12Combo && executor.team === byPlace[1].team && p <= 2) continue;
+                if (is13Combo && executor.team === byPlace[1].team && (p === 1 || p === 3)) continue;
+
+                const mark = executor.getActiveRoundingMark();
+                const dExecMark = mark ? distBetween(executor, mark) : 9999;
+                const dExecVictim = distBetween(executor, victim);
+                const dVictimBen = beneficiary ? distBetween(victim, beneficiary) : 9999;
+
+                // Case A: Mark Trap Trio (approaching M1, M2, M3, or M4 within 3.1x Zone Radius)
+                if (mark && dExecMark < THREE_BL_RADIUS * 3.1 && dExecVictim < BOAT_LENGTH * 4.5 && ((beneficiary && dVictimBen < BOAT_LENGTH * 6.0) || is3In123 || is1In156)) {
+                    const trapType = `MARK TRAP @ M${executor.leg}`;
+                    jobs[executor.id] = {
+                        job: 'ATTACK',
+                        targetId: victim.id,
+                        helperId: beneficiary ? beneficiary.id : null,
+                        detail: `${trapType}: TRAP ${victim.id} FOR ${beneficiary ? beneficiary.id : 'TEAM'}!`,
+                        mode: is1In156 ? 'TRAP_DOUBLE' : 'MARK_TRAP_FOCUS',
+                        place: p,
+                        trioType: 'MARK_TRAP'
+                    };
+                    if (beneficiary) {
+                        jobs[beneficiary.id] = {
+                            job: 'PASS',
+                            targetId: victim.id,
+                            helperId: executor.id,
+                            detail: `SHOOT INSIDE ${executor.id}'S TRAP ON ${victim.id}!`,
+                            mode: 'PASS_BENEFICIARY',
+                            place: rankMap.get(beneficiary.id) || (p + 2),
+                            trioType: 'MARK_TRAP'
+                        };
+                    }
+                    activeTrios.push({
+                        team: executor.team,
+                        type: trapType,
+                        executorId: executor.id,
+                        victimId: victim.id,
+                        beneficiaryId: beneficiary ? beneficiary.id : null,
+                        mark
+                    });
+                }
+                // Case B: Open-Course Pass-Back Trio (Upwind, Reach, or Downwind when Executor, Victim, and Beneficiary are within striking range)
+                else if (beneficiary && dExecVictim < BOAT_LENGTH * 3.8 && dVictimBen < BOAT_LENGTH * 5.2) {
+                    const pbType = (executor.leg === 1 || executor.leg === 5) ? 'UPWIND PASS-BACK' : (executor.leg === 3 ? 'DOWNWIND HOOK' : 'REACH HOOK');
+                    jobs[executor.id] = {
+                        job: 'ATTACK',
+                        targetId: victim.id,
+                        helperId: beneficiary.id,
+                        detail: `${pbType}: SLOW ${victim.id} -> PASS ${beneficiary.id}!`,
+                        mode: 'PASSBACK_EXEC',
+                        place: p,
+                        trioType: 'PASSBACK'
+                    };
+                    jobs[beneficiary.id] = {
+                        job: 'PASS',
+                        targetId: victim.id,
+                        helperId: executor.id,
+                        detail: `PASS ${victim.id} (${executor.id} BLOCKING)!`,
+                        mode: 'PASS_BENEFICIARY',
+                        place: rankMap.get(beneficiary.id) || (p + 2),
+                        trioType: 'PASSBACK'
+                    };
+                    activeTrios.push({
+                        team: executor.team,
+                        type: pbType,
+                        executorId: executor.id,
+                        victimId: victim.id,
+                        beneficiaryId: beneficiary.id,
+                        mark: null
+                    });
+                }
+            }
+
+            gameState.playbookState.activeTrios = activeTrios;
             gameState.playbookState[winTeam] = { callout: winCallout, winning: true };
             gameState.playbookState[loseTeam] = { callout: loseCallout, winning: false };
             gameState.playbookState.jobsByBoatId = jobs;
 
-            const calloutSignature = `${comboKey}:${winTeam}-${winCallout}:${loseTeam}-${loseCallout}`;
-            if (gameState.phase === 'RACING' && gameState.playbookState.lastCalloutKey !== calloutSignature) {
-                gameState.playbookState.lastCalloutKey = calloutSignature;
+            const callKey = `${comboKey}_${winCallout}_${loseCallout}`;
+            if (gameState.phase === 'RACING' && gameState.playbookState.lastCalloutKey !== callKey && Math.random() < 0.08) {
+                gameState.playbookState.lastCalloutKey = callKey;
                 const winLeader = sortedBoats.find(b => b.team === winTeam);
-                const loseLeader = sortedBoats.find(b => b.team === loseTeam);
                 if (winLeader) {
-                    logRadio(winLeader.id, winTeam, `Calling "${winCallout}" (${comboKey})`);
-                }
-                if (loseLeader) {
-                    logRadio(loseLeader.id, loseTeam, `Calling "${loseCallout}" (${comboKey})`);
+                    logRadio(winLeader.id, winTeam, `"${winCallout}!" (${comboKey})`);
                 }
             }
+        }
+
+        // ============================================================================
+        // MATHEMATICAL CLINCHER & 90s FINISHING WINDOW EVALUATOR
+        // ============================================================================
+        function evaluateMatchClincherAndWindow(sortedBoats) {
+            const activeBoats = gameState.boats.filter(b => b.activeInRace);
+            if (activeBoats.length < 6) return null;
+
+            const finishedBoats = gameState.finishOrder.filter(b => b.activeInRace && b.finished);
+            if (finishedBoats.length === 0) return null;
+
+            const F = finishedBoats.length;
+            let blueFinishedPts = 0;
+            let redFinishedPts = 0;
+            let blueFinishedCount = 0;
+            let redFinishedCount = 0;
+            const firstPlaceTeam = finishedBoats[0].team;
+
+            finishedBoats.forEach((b, idx) => {
+                const place = idx + 1;
+                const penPts = (b.ocs ? 10 : 0) + (b.penalties > 0 ? 6 : 0);
+                if (b.team === 'BLUE') {
+                    blueFinishedPts += place + penPts;
+                    blueFinishedCount++;
+                } else {
+                    redFinishedPts += place + penPts;
+                    redFinishedCount++;
+                }
+            });
+
+            const blueRemaining = 3 - blueFinishedCount;
+            const redRemaining = 3 - redFinishedCount;
+
+            // Remaining places are (F + 1) ... 6
+            // Best possible score for a team = they take the lowest remaining places (F+1, F+2...)
+            // Worst possible score for a team = they take the highest remaining places (6, 5...)
+            let blueWorstPts = blueFinishedPts;
+            let blueBestPts = blueFinishedPts;
+            for (let i = 0; i < blueRemaining; i++) {
+                blueBestPts += (F + 1 + i);
+                blueWorstPts += (6 - i);
+            }
+
+            let redWorstPts = redFinishedPts;
+            let redBestPts = redFinishedPts;
+            for (let i = 0; i < redRemaining; i++) {
+                redBestPts += (F + 1 + i);
+                redWorstPts += (6 - i);
+            }
+
+            // RRS D3.4: Lower total points wins. If totals are equal, the team that does NOT have 1st place wins.
+            const blueCanNeverLose = (blueWorstPts < redBestPts) || (blueWorstPts === redBestPts && firstPlaceTeam !== 'BLUE');
+            const redCanNeverLose = (redWorstPts < blueBestPts) || (redWorstPts === blueBestPts && firstPlaceTeam !== 'RED');
+
+            if (blueCanNeverLose || redCanNeverLose) {
+                const winner = blueCanNeverLose ? 'BLUE' : 'RED';
+                const finishedCombo = finishedBoats
+                    .map((b, idx) => ({ team: b.team, place: idx + 1 }))
+                    .filter(x => x.team === winner)
+                    .map(x => x.place)
+                    .join('-');
+                return {
+                    clinched: true,
+                    winner,
+                    reason: `${winner} TEAM CLINCHED (${finishedCombo} Across Line — Mathematical Lock!)`
+                };
+            }
+            return null;
+        }
+
+        function finalizeRemainingBoatsInPlace(sortedBoats, reasonText) {
+            for (const b of sortedBoats) {
+                if (b.activeInRace && !b.finished) {
+                    b.finished = true;
+                    b.finishTime = gameState.timer;
+                    b.roleBadge = 'FINISHED IN PLACE';
+                    gameState.finishOrder.push(b);
+                }
+            }
+            gameState.finishReason = reasonText || 'Regatta Complete';
+            gameState.phase = 'FINISHED';
+            gameState.running = false;
+            showFinishModal(gameState.finishOrder);
         }
 
         // ============================================================================
@@ -1084,6 +1330,7 @@
                 this.roleBadge = '';
                 this.jobType = 'CHASE';
                 this.aiTackCooldown = 0;
+                this.tackAssistSign = 0;
                 this.pinTimer = 0;
                 this.trapHoldTimer = 0;
                 this.escapeStage = 0;
@@ -1097,8 +1344,22 @@
                 const localWind = getWindAt(this.x, this.y);
                 const effWindDir = wrapAngle180(localWind.dir + this.shadowHeader);
                 const rel = wrapAngle180(this.heading - effWindDir);
-                const newSign = rel >= 0 ? -1 : 1;
-                const targetAbs = Math.max(40, Math.min(55, Math.abs(rel) || 42));
+                const newSign = rel === 0 ? (this.tack === 'STBD' ? 1 : -1) : (rel > 0 ? -1 : 1);
+                const targetAbs = Math.max(43, Math.min(54, Math.abs(rel) < 38 ? 43 : Math.abs(rel)));
+                this.targetHeading = wrapAngle180(effWindDir + newSign * targetAbs);
+                this.tackAssistSign = newSign;
+                this.isTacking = true;
+                this.tackingTimer = 2.2;
+                this.aiTackCooldown = 2.4;
+            }
+
+            triggerGybe() {
+                if (this.spinning || this.finished) return;
+                const localWind = getWindAt(this.x, this.y);
+                const effWindDir = wrapAngle180(localWind.dir + this.shadowHeader);
+                const rel = wrapAngle180(this.heading - effWindDir);
+                const newSign = rel === 0 ? (this.tack === 'STBD' ? 1 : -1) : (rel > 0 ? -1 : 1);
+                const targetAbs = Math.max(142, Math.min(162, Math.abs(rel) < 120 ? 148 : Math.abs(rel)));
                 this.targetHeading = wrapAngle180(effWindDir + newSign * targetAbs);
                 this.aiTackCooldown = 2.4;
             }
@@ -1144,32 +1405,38 @@
                     return { x: laneX, y: COURSE.startPin.y - 65 };
                 }
                 if (this.leg === 1) {
-                    if (this.y > COURSE.mark1.y + 38) {
-                        return { x: COURSE.mark1.x - 45, y: COURSE.mark1.y - 8 };
+                    // Wide, clean Starboard rounding arc around Mark 1 (West -> North-East)
+                    if (this.markApproachStage === 0 && this.y > COURSE.mark1.y + 18) {
+                        return { x: COURSE.mark1.x - 58, y: COURSE.mark1.y - 16 };
                     }
-                    return { x: COURSE.mark1.x + 48, y: COURSE.mark1.y - 34 };
+                    return { x: COURSE.mark1.x + 56, y: COURSE.mark1.y - 46 };
                 }
                 if (this.leg === 2) {
-                    if (this.x < COURSE.mark2.x + 15) {
-                        return { x: COURSE.mark2.x + 40, y: COURSE.mark2.y - 36 };
+                    // Wide, clean Starboard rounding arc around Mark 2 (North -> South-East)
+                    if (this.markApproachStage === 0 && this.x < COURSE.mark2.x + 8) {
+                        return { x: COURSE.mark2.x + 48, y: COURSE.mark2.y - 52 };
                     }
-                    return { x: COURSE.mark2.x + 42, y: COURSE.mark2.y + 52 };
+                    return { x: COURSE.mark2.x + 54, y: COURSE.mark2.y + 58 };
                 }
                 if (this.leg === 3) {
-                    if (this.y < COURSE.mark3.y - 12) {
-                        return { x: COURSE.mark3.x - 44, y: COURSE.mark3.y + 34 };
+                    // Wide, clean Port rounding arc around Mark 3 (West -> South-East)
+                    if (this.markApproachStage === 0 && this.y < COURSE.mark3.y - 8) {
+                        return { x: COURSE.mark3.x - 58, y: COURSE.mark3.y + 42 };
                     }
-                    return { x: COURSE.mark3.x + 46, y: COURSE.mark3.y + 40 };
+                    return { x: COURSE.mark3.x + 56, y: COURSE.mark3.y + 52 };
                 }
                 if (this.leg === 4) {
-                    if (this.x < COURSE.mark4.x + 12) {
-                        return { x: COURSE.mark4.x + 42, y: COURSE.mark4.y + 40 };
+                    // Wide, clean Port rounding arc around Mark 4 (South -> North-East)
+                    if (this.markApproachStage === 0 && this.x < COURSE.mark4.x + 8) {
+                        return { x: COURSE.mark4.x + 48, y: COURSE.mark4.y + 54 };
                     }
-                    return { x: COURSE.mark4.x + 36, y: COURSE.mark4.y - 52 };
+                    return { x: COURSE.mark4.x + 48, y: COURSE.mark4.y - 58 };
                 }
+                // On Leg 5 (Final Beat to Finish), aim for the nearest favored third of the finish line for the shortest VMG finish!
+                const clampedFinX = Math.max(COURSE.finishPin.x + 65, Math.min(COURSE.finishRC.x - 65, this.x));
                 return {
-                    x: (COURSE.finishPin.x + COURSE.finishRC.x) * 0.5,
-                    y: COURSE.finishPin.y - 30
+                    x: clampedFinX,
+                    y: COURSE.finishPin.y - 40
                 };
             }
 
@@ -1193,6 +1460,36 @@
                     }
                 }
                 return { x: bestX, y: bestY };
+            }
+
+            // Smart VMG Shift & Clean-Lane Tactician:
+            // Evaluates whether the wind is currently lifted or headed on this tack, or if dirty air/lulls make tacking immediately higher VMG.
+            evaluateStrategicShiftAndLane(effWindDir, desiredCourse, isUpwind) {
+                if (!isUpwind || this.aiTackCooldown > 0 || this.inZone) return false;
+                // Avoid over-tacking near the mark layline
+                const activeMark = this.getActiveRoundingMark();
+                if (activeMark && distBetween(this, activeMark) < THREE_BL_RADIUS * 1.9) return false;
+
+                // 1. Header Detection: If current tack angle to waypoint is > 54° offdesiredCourse while the opposite tack is < 34° offdesiredCourse, we are on a heavy header!
+                const chSign = this.tack === 'STBD' ? -1 : 1;
+                const myCloseHauled = wrapAngle180(effWindDir + chSign * 42);
+                const oppCloseHauled = wrapAngle180(effWindDir - chSign * 42);
+                const errNow = Math.abs(angleDiff(desiredCourse, myCloseHauled));
+                const errOpp = Math.abs(angleDiff(desiredCourse, oppCloseHauled));
+
+                if (errNow > errOpp + 18 && this.canSafelyTack()) {
+                    this.roleBadge = `TACKING ON HEADER FOR VMG!`;
+                    this.triggerTack();
+                    return true;
+                }
+
+                // 2. Dirty Air Escape: If heavily blanketed (> 28%) and not locked in an intentional pin, tack to clear air
+                if (this.shadowFactor > 0.28 && this.jobType !== 'ATTACK' && this.canSafelyTack()) {
+                    this.roleBadge = `TACKING TO CLEAR AIR LANE!`;
+                    this.triggerTack();
+                    return true;
+                }
+                return false;
             }
 
             update(dt, rankMap) {
@@ -1305,17 +1602,48 @@
                 this.tack = this.signedTwa <= 0 ? 'STBD' : 'PORT';
 
                 const passedHeadToWind = (Math.sign(prevSigned) !== Math.sign(this.signedTwa)) && this.twa < 75 && !this.spinning;
+                const passedDownwind = (Math.sign(prevSigned) !== Math.sign(this.signedTwa)) && this.twa > 115 && !this.spinning;
+
                 if (passedHeadToWind) {
                     this.isTacking = true;
-                    this.tackingTimer = 2.0;
+                    this.tackingTimer = 2.2;
+                    const newSign = this.signedTwa >= 0 ? 1 : -1;
+                    this.tackAssistSign = newSign;
+                    if (this.targetHeading === null && this.isPlayer) {
+                        this.targetHeading = wrapAngle180(effWindDir + newSign * 43);
+                    }
                     onBoatPassedHeadToWind(this);
+                } else if (passedDownwind && !this.isTacking) {
+                    const newSign = this.signedTwa >= 0 ? 1 : -1;
+                    if (this.targetHeading === null && this.isPlayer) {
+                        this.targetHeading = wrapAngle180(effWindDir + newSign * 148);
+                    }
+                    if (this.tack === 'STBD') {
+                        this.justAcquiredRowTimer = 1.25;
+                    }
+                }
+
+                // Prevent getting stuck in irons (No-Go Zone < 34° TWA):
+                // If a boat is in the no-go zone while tacking or not actively pinching, smoothly carry its bow out to close-hauled (43° TWA)
+                if (!this.spinning && this.twa < 35) {
+                    const userPinchingInIrons = this.isPlayer && (keys.up || keys.left || keys.right);
+                    if (this.targetHeading !== null || this.isTacking || !userPinchingInIrons) {
+                        const outSign = this.tackAssistSign !== 0
+                            ? this.tackAssistSign
+                            : (this.signedTwa === 0 ? (this.tack === 'STBD' ? -1 : 1) : Math.sign(this.signedTwa));
+                        const escapeCH = wrapAngle180(effWindDir + outSign * 43);
+                        if (this.targetHeading === null) {
+                            this.targetHeading = escapeCH;
+                        }
+                    }
                 }
 
                 if (this.isTacking) {
                     this.tackingTimer -= dt;
-                    if (this.twa >= 39 || this.tackingTimer <= 0) {
+                    if (this.twa >= 40 || this.tackingTimer <= 0) {
                         this.isTacking = false;
                         this.tackingTimer = 0;
+                        this.tackAssistSign = 0;
                         if (this.tack === 'STBD') {
                             this.justAcquiredRowTimer = 1.25;
                         }
@@ -1326,6 +1654,11 @@
 
                 const effWindSpeed = localWind.speed * (1 - this.shadowFactor * 0.42);
                 let targetSpeed = getC420PolarSpeed(this.twa, effWindSpeed);
+
+                // Roll-tack momentum preservation: while actively tacking through the eye of the wind, maintain steerageway so the boat never stalls in irons
+                if (this.isTacking || (this.targetHeading !== null && this.twa < 38)) {
+                    targetSpeed = Math.max(targetSpeed, Math.min(this.speed * 0.92, 3.85));
+                }
 
                 if (this.luffing) targetSpeed *= 0.32;
                 if (this.spinning) targetSpeed *= 0.48;
@@ -1367,22 +1700,66 @@
                 const jobHint = assignedPlay ? ` • ${assignedPlay.job}` : '';
                 this.roleBadge = (this.skipperName ? `👤 ${this.skipperName}` : 'YOU') + jobHint;
 
-                const turnSpeed = 68;
+                const turnSpeed = 76;
+                const prevRel = wrapAngle180(this.heading - effWindDir);
 
-                if (keys.up || keys.down) {
+                if (keys.left || keys.right) {
                     this.targetHeading = null;
-                    const rel = wrapAngle180(this.heading - effWindDir);
-                    const sign = rel === 0 ? (this.tack === 'STBD' ? -1 : 1) : Math.sign(rel);
+                    if (keys.left) {
+                        // [A] Turn Counterclockwise (Port)
+                        this.heading = wrapAngle180(this.heading - turnSpeed * dt);
+                    }
+                    if (keys.right) {
+                        // [D] Turn Clockwise (Starboard)
+                        this.heading = wrapAngle180(this.heading + turnSpeed * dt);
+                    }
+
+                    const newRel = wrapAngle180(this.heading - effWindDir);
+                    // If manual A/D turning hits or crosses head-to-wind (< 18° TWA), trigger a full roll-tack carry-through to 43° on the new tack
+                    if ((Math.sign(prevRel) !== Math.sign(newRel) && Math.abs(newRel) < 60) || (Math.abs(newRel) < 16 && Math.abs(newRel) < Math.abs(prevRel))) {
+                        const newSign = keys.right ? 1 : -1;
+                        this.tackAssistSign = newSign;
+                        this.isTacking = true;
+                        this.tackingTimer = 2.2;
+                        this.targetHeading = wrapAngle180(effWindDir + newSign * 43);
+                    }
+                    // If manual A/D turning hits or crosses dead downwind (> 168° TWA), trigger a clean gybe onto the new tack
+                    else if ((Math.sign(prevRel) !== Math.sign(newRel) && Math.abs(newRel) > 120) || (Math.abs(newRel) > 170 && Math.abs(newRel) > Math.abs(prevRel))) {
+                        const newSign = keys.left ? 1 : -1;
+                        this.targetHeading = wrapAngle180(effWindDir + newSign * 148);
+                    }
+                } else if (keys.up || keys.down) {
+                    this.targetHeading = null;
+                    const sign = prevRel === 0 ? (this.tack === 'STBD' ? -1 : 1) : Math.sign(prevRel);
 
                     if (keys.up) {
                         this.heading = wrapAngle180(this.heading - sign * turnSpeed * dt);
+                        const newRel = wrapAngle180(this.heading - effWindDir);
+                        // When heading up [W] reaches head-to-wind (< 14° TWA or crosses 0°), automatically complete the tack onto the new tack!
+                        if (Math.sign(prevRel) !== Math.sign(newRel) || Math.abs(newRel) < 14) {
+                            const newSign = -sign;
+                            this.tackAssistSign = newSign;
+                            this.isTacking = true;
+                            this.tackingTimer = 2.2;
+                            this.heading = wrapAngle180(effWindDir + newSign * 16);
+                            this.targetHeading = wrapAngle180(effWindDir + newSign * 43);
+                        }
                     }
                     if (keys.down) {
                         this.heading = wrapAngle180(this.heading + sign * turnSpeed * dt);
+                        const newRel = wrapAngle180(this.heading - effWindDir);
+                        // When bearing away [S] reaches dead downwind (> 170° TWA or crosses 180°), automatically complete the gybe!
+                        if (Math.sign(prevRel) !== Math.sign(newRel) || Math.abs(newRel) > 170) {
+                            const newSign = -sign;
+                            this.heading = wrapAngle180(effWindDir + newSign * 166);
+                            this.targetHeading = wrapAngle180(effWindDir + newSign * 148);
+                        }
                     }
                 } else if (this.targetHeading !== null) {
+                    // Use faster turn rate while tacking through the no-go zone so the bow never stalls in irons
+                    const activeTurnRate = (this.isTacking || this.twa < 38) ? turnSpeed * 1.65 : turnSpeed * 1.35;
                     const diff = angleDiff(this.targetHeading, this.heading);
-                    const step = turnSpeed * 1.35 * dt;
+                    const step = activeTurnRate * dt;
                     if (Math.abs(diff) <= step) {
                         this.heading = this.targetHeading;
                         this.targetHeading = null;
@@ -1499,16 +1876,51 @@
                 const activeMark = this.getActiveRoundingMark();
                 const distToMark = activeMark ? distBetween(this, activeMark) : 999;
 
-                let abortSlowPlayForFinish = false;
-                if (this.leg === 5 && teamIsWinning && this.y < COURSE.finishPin.y + 360) {
-                    const beneficiaryClose = helperBoat && distBetween(this, helperBoat) < 125;
+                let abortSlowPlayForFinish = (mode === 'CLINCH_SPRINT');
+                if (this.leg === 5 && teamIsWinning && this.y < COURSE.finishPin.y + 480) {
+                    const beneficiaryClose = helperBoat && distBetween(this, helperBoat) < 120;
                     if (!beneficiaryClose) {
                         abortSlowPlayForFinish = true;
                     }
                 }
 
+                // FLEET-RACE CLINCH SPRINT MODE (When holding 1-2 or 1-3 anywhere on the course):
+                // Pure fleet-race speed around every leg of the Digital N course to reach the finish line as fast as possible!
+                if (mode === 'CLINCH_SPRINT') {
+                    this.luffing = false;
+                    this.speedMatchCap = null;
+                    this.speedFloor = isUpwind ? 5.35 : 6.15;
+                    this.roleBadge = assignedPlay.detail || 'FLEET RACE: MAX VMG TO FINISH!';
+
+                    if (this.leg === 2 || this.leg === 4) {
+                        // On reaches (Leg 2 & Leg 4), sail a tight, high-speed direct line to the next mark's rounding tangent
+                        directManeuverHeading = desiredCourse;
+                    } else if (this.leg === 3) {
+                        // On the downwind run (Leg 3), sail optimal VMG broad reach / rhumb line without slowing for anyone
+                        const downwindCenter = wrapAngle180(effWindDir + 180);
+                        const diffFromDeadRun = Math.abs(angleDiff(desiredCourse, downwindCenter));
+                        if (diffFromDeadRun >= 20) {
+                            directManeuverHeading = desiredCourse;
+                        }
+                    } else if (this.leg === 5) {
+                        const finishLineY = COURSE.finishPin.y;
+                        const distToFinishY = this.y - finishLineY;
+                        const chSign = this.tack === 'STBD' ? -1 : 1;
+                        const chHeading = wrapAngle180(effWindDir + chSign * 41);
+                        const chRad = degToRad(chHeading);
+                        if (-Math.cos(chRad) < -0.2 && distToFinishY > 0) {
+                            const timeToLine = distToFinishY / (Math.cos(chRad));
+                            const projectedX = this.x + Math.sin(chRad) * timeToLine;
+                            if (projectedX >= COURSE.finishPin.x + 24 && projectedX <= COURSE.finishRC.x - 24) {
+                                directManeuverHeading = chHeading;
+                                this.roleBadge = `FETCHING FINISH LINE (${this.id})!`;
+                            }
+                        }
+                    }
+                }
+
                 // JOB 1: COVER
-                if (job === 'COVER' && targetBoat) {
+                else if (job === 'COVER' && targetBoat) {
                     const dTarget = distBetween(this, targetBoat);
 
                     if (this.leg === 5 && this.y > COURSE.mark4.y - 260) {
@@ -1572,36 +1984,44 @@
                         ((this.leg === 2 || this.leg === 4) && this.x > targetBoat.x + 14)
                     );
 
-                    if (isAheadOfTarget && dTarget > BOAT_LENGTH * 2.4 && distToMark > THREE_BL_RADIUS * 1.4) {
+                    // Pre-zone deceleration & lateral alignment for Mark Traps:
+                    // Per Team Race Maneuvers PDF (Slide 15 & Slide 60): intercept the opponent's approach line before the zone,
+                    // match their lateral track, and brake hard so they are forced to overlap outside or stall behind.
+                    if (isAheadOfTarget && distToMark < THREE_BL_RADIUS * 3.1 && dTarget > BOAT_LENGTH * 0.85 && dTarget < BOAT_LENGTH * 4.5) {
                         this.luffing = true;
-                        this.speedMatchCap = Math.max(1.8, targetBoat.speed * 0.62);
-                        this.roleBadge = `WAITING TO TRAP ${targetBoat.id}`;
+                        const desiredClosingSpeed = dTarget > BOAT_LENGTH * 1.75 ? targetBoat.speed * 0.38 : targetBoat.speed * 0.68;
+                        this.speedMatchCap = Math.max(1.15, desiredClosingSpeed);
+                        this.roleBadge = `BRAKING TO SET MARK TRAP ON ${targetBoat.id}!`;
+                    } else if (isAheadOfTarget && dTarget > BOAT_LENGTH * 1.8 && dTarget < BOAT_LENGTH * 4.2 && helperBoat) {
+                        this.luffing = true;
+                        this.speedMatchCap = Math.max(1.45, targetBoat.speed * 0.55);
+                        this.roleBadge = `SLOWING FOR PASS-BACK ON ${targetBoat.id}`;
                     }
 
                     if (mode === 'CHAOS_TURTLE' && isUpwind) {
                         if (this.aiTackCooldown <= 0 && this.canSafelyTack()) {
                             this.triggerTack();
                         }
-                    } else if (this.leg === 1 && distToMark < THREE_BL_RADIUS * 2.1 && dTarget < 210) {
+                    } else if (this.leg === 1 && distToMark < THREE_BL_RADIUS * 2.6 && dTarget < 245) {
                         if (!this.inZone) {
-                            const setupX = Math.min(COURSE.mark1.x - 18, targetBoat.x - 14);
-                            const setupY = Math.max(COURSE.mark1.y + THREE_BL_RADIUS * 0.85, targetBoat.y - 8);
+                            const setupX = Math.min(COURSE.mark1.x - 16, targetBoat.x - 14);
+                            const setupY = Math.max(COURSE.mark1.y + THREE_BL_RADIUS * 0.75, targetBoat.y - 6);
                             directManeuverHeading = radToDeg(Math.atan2(setupX - this.x, -(setupY - this.y)));
-                            if (dTarget < 115 && this.y < targetBoat.y + 18) {
+                            if (dTarget < 155 && this.y < targetBoat.y + 22) {
                                 this.luffing = true;
-                                this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.72);
-                                this.roleBadge = `M1 STBD HOOK ON ${targetBoat.id}!`;
+                                this.speedMatchCap = Math.max(1.3, targetBoat.speed * 0.58);
+                                this.roleBadge = `M1 STBD HOOK & BRAKE ON ${targetBoat.id}!`;
                             }
                         } else {
                             const pastMarkX = COURSE.mark1.x - 28;
-                            const pastMarkY = COURSE.mark1.y - 42;
-                            const headToWindStbd = wrapAngle180(effWindDir - 14);
-                            directManeuverHeading = (this.y < COURSE.mark1.y + 18)
+                            const pastMarkY = COURSE.mark1.y - 44;
+                            const headToWindStbd = wrapAngle180(effWindDir - 12);
+                            directManeuverHeading = (this.y < COURSE.mark1.y + 22)
                                 ? headToWindStbd
                                 : radToDeg(Math.atan2(pastMarkX - this.x, -(pastMarkY - this.y)));
                             this.luffing = true;
-                            this.speedMatchCap = Math.max(1.5, targetBoat.speed * 0.82);
-                            this.roleBadge = `M1 TRAP: DRIVING ${targetBoat.id} HIGH!`;
+                            this.speedMatchCap = Math.max(1.2, targetBoat.speed * 0.72);
+                            this.roleBadge = `M1 TRAP: SHUTTING DOOR ON ${targetBoat.id}!`;
 
                             if (helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark1.x - 10 && helperBoat.y < COURSE.mark1.y + 25))) {
                                 directManeuverHeading = radToDeg(Math.atan2((COURSE.mark1.x + 42) - this.x, -((COURSE.mark1.y - 32) - this.y)));
@@ -1610,112 +2030,122 @@
                                 this.roleBadge = `M1 TRAP COMPLETE -> BEAR OFF!`;
                             }
                         }
-                    } else if (this.leg === 2 && distToMark < THREE_BL_RADIUS * 2.1 && dTarget < 220) {
+                    } else if (this.leg === 2 && distToMark < THREE_BL_RADIUS * 2.6 && dTarget < 250) {
                         this.trapHoldTimer += dt;
-                        if (this.x < COURSE.mark2.x - 22 && !this.inZone) {
-                            const dipX = COURSE.mark2.x - 35;
-                            const dipY = COURSE.mark2.y + 28;
+                        if (this.x < COURSE.mark2.x - 18 && !this.inZone) {
+                            const dipX = COURSE.mark2.x - 32;
+                            const dipY = COURSE.mark2.y + 32;
                             directManeuverHeading = radToDeg(Math.atan2(dipX - this.x, -(dipY - this.y)));
-                            if (dTarget < 115 && this.x > targetBoat.x - 10) {
+                            if (dTarget < 155 && this.x > targetBoat.x - 12) {
                                 this.luffing = true;
-                                this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.68);
-                                this.roleBadge = `M2 DIP & STALL FOR ${targetBoat.id}`;
+                                this.speedMatchCap = Math.max(1.3, targetBoat.speed * 0.55);
+                                this.roleBadge = `M2 DIP & BRAKE FOR ${targetBoat.id}`;
                             }
                         } else {
-                            const luffHighX = COURSE.mark2.x + 10;
-                            const luffHighY = COURSE.mark2.y - 58;
+                            const luffHighX = COURSE.mark2.x + 12;
+                            const luffHighY = COURSE.mark2.y - 62;
                             directManeuverHeading = radToDeg(Math.atan2(luffHighX - this.x, -(luffHighY - this.y)));
                             this.luffing = true;
-                            this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.88);
-                            this.roleBadge = mode === 'TRAP_DOUBLE' ? `M2 TWOFUR TRAP ON ${targetBoat.id}!` : `M2 LUFFING ${targetBoat.id} WIDE!`;
+                            this.speedMatchCap = Math.max(1.3, targetBoat.speed * 0.78);
+                            this.roleBadge = mode === 'TRAP_DOUBLE' ? `M2 TWOFUR TRAP ON ${targetBoat.id}!` : `M2 OFFSET TRAP: LUFFING ${targetBoat.id}!`;
 
                             const teammatePassed = helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark2.x && helperBoat.y > COURSE.mark2.y));
-                            if (teammatePassed || this.trapHoldTimer > 5.8) {
+                            if (teammatePassed || this.trapHoldTimer > 6.2) {
                                 this.trapHoldTimer = 0;
                                 directManeuverHeading = null;
                                 this.luffing = false;
                                 this.speedMatchCap = null;
                             }
                         }
-                    } else if (this.leg === 3 && distToMark < THREE_BL_RADIUS * 2.1 && dTarget < 220) {
+                    } else if (this.leg === 3 && distToMark < THREE_BL_RADIUS * 2.6 && dTarget < 250) {
                         this.trapHoldTimer += dt;
                         if (!this.inZone) {
                             const paX = COURSE.mark3.x - 52;
                             const paY = COURSE.mark3.y - 28;
                             directManeuverHeading = radToDeg(Math.atan2(paX - this.x, -(paY - this.y)));
-                            if (dTarget < 120 && this.y > targetBoat.y - 10) {
+                            if (dTarget < 155 && this.y > targetBoat.y - 12) {
                                 this.luffing = true;
-                                this.speedMatchCap = Math.max(1.7, targetBoat.speed * 0.72);
-                                this.roleBadge = `M3 POWER-ANGLE SETUP ON ${targetBoat.id}`;
+                                this.speedMatchCap = Math.max(1.35, targetBoat.speed * 0.58);
+                                this.roleBadge = `M3 POWER-ANGLE BRAKE ON ${targetBoat.id}`;
                             }
                         } else {
-                            const drivePastX = COURSE.mark3.x - 58;
-                            const drivePastY = COURSE.mark3.y + 38;
+                            const drivePastX = COURSE.mark3.x - 60;
+                            const drivePastY = COURSE.mark3.y + 42;
                             directManeuverHeading = radToDeg(Math.atan2(drivePastX - this.x, -(drivePastY - this.y)));
                             this.luffing = true;
-                            this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.85);
+                            this.speedMatchCap = Math.max(1.3, targetBoat.speed * 0.75);
                             this.roleBadge = `M3 TRAP: DRIVING ${targetBoat.id} PAST MARK!`;
 
                             const teammatePassed = helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark3.x + 12 && helperBoat.y > COURSE.mark3.y - 20));
-                            if (teammatePassed || this.trapHoldTimer > 5.2) {
+                            if (teammatePassed || this.trapHoldTimer > 5.6) {
                                 this.trapHoldTimer = 0;
                                 directManeuverHeading = radToDeg(Math.atan2((COURSE.mark3.x + 45) - this.x, -((COURSE.mark3.y + 38) - this.y)));
                                 this.luffing = false;
                                 this.speedMatchCap = null;
                             }
                         }
-                    } else if (this.leg === 4 && distToMark < THREE_BL_RADIUS * 2.0 && dTarget < 210) {
+                    } else if (this.leg === 4 && distToMark < THREE_BL_RADIUS * 2.5 && dTarget < 245) {
                         this.trapHoldTimer += dt;
                         const m4WideX = COURSE.mark4.x + 28;
-                        const m4WideY = COURSE.mark4.y + 46;
+                        const m4WideY = COURSE.mark4.y + 48;
                         directManeuverHeading = radToDeg(Math.atan2(m4WideX - this.x, -(m4WideY - this.y)));
-                        if (dTarget < 110) {
+                        if (dTarget < 145) {
                             this.luffing = true;
-                            this.speedMatchCap = Math.max(1.7, targetBoat.speed * 0.82);
-                            this.roleBadge = `M4 TRAP: FORCING ${targetBoat.id} LOW!`;
+                            this.speedMatchCap = Math.max(1.35, targetBoat.speed * 0.68);
+                            this.roleBadge = `M4 TRAP: FORCING ${targetBoat.id} WIDE & LOW!`;
                         }
                         const teammatePassed = helperBoat && (helperBoat.leg > this.leg || (helperBoat.x > COURSE.mark4.x + 10 && helperBoat.y < COURSE.mark4.y));
-                        if (teammatePassed || this.trapHoldTimer > 5.0) {
+                        if (teammatePassed || this.trapHoldTimer > 5.4) {
                             this.trapHoldTimer = 0;
                             directManeuverHeading = null;
                             this.luffing = false;
                             this.speedMatchCap = null;
                         }
                     } else if (isUpwind) {
-                        if (this.tack !== targetBoat.tack && dTarget < 210) {
-                            const interceptX = targetBoat.x + (this.tack === 'STBD' ? -18 : 18);
-                            const interceptY = targetBoat.y - 18;
+                        if (this.tack !== targetBoat.tack && dTarget < 240) {
+                            const interceptX = targetBoat.x + (this.tack === 'STBD' ? -22 : 22);
+                            const interceptY = targetBoat.y - 26;
                             directManeuverHeading = radToDeg(Math.atan2(interceptX - this.x, -(interceptY - this.y)));
                             this.roleBadge = `INTERCEPTING ${targetBoat.id} ESCAPE`;
-                            if (this.tack === 'PORT' && dTarget < 72 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                            if (this.tack === 'PORT' && dTarget < 88 && dTarget > 48 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
                                 this.triggerTack();
                             }
-                        } else if (this.tack === targetBoat.tack && dTarget < 220) {
+                        } else if (this.tack === targetBoat.tack && dTarget < 245) {
+                            // Synchronized Upwind Pass-Back & Dirty-Air Blanket:
+                            // Maintain a safe 30px windward-bow cushion so we blanket & pin without ever colliding hulls!
                             const windwardSign = this.tack === 'STBD' ? 1 : -1;
-                            const pinHipX = targetBoat.x + windwardSign * 26;
-                            const pinHipY = targetBoat.y - 12;
+                            const pinHipX = targetBoat.x + windwardSign * 30;
+                            const pinHipY = targetBoat.y - 20;
                             const distToHip = Math.hypot(pinHipX - this.x, pinHipY - this.y);
 
                             if (distToHip > 24) {
                                 directManeuverHeading = radToDeg(Math.atan2(pinHipX - this.x, -(pinHipY - this.y)));
                                 const relToWind = wrapAngle180(directManeuverHeading - effWindDir);
                                 const sign = this.tack === 'STBD' ? -1 : 1;
-                                const clampedTwa = Math.max(33, Math.min(72, Math.abs(relToWind)));
+                                const clampedTwa = Math.max(34, Math.min(72, Math.abs(relToWind)));
                                 directManeuverHeading = wrapAngle180(effWindDir + sign * clampedTwa);
-                                this.roleBadge = `BEARING DOWN TO PIN ${targetBoat.id}`;
-                                if (this.y < targetBoat.y - 22) {
+                                this.roleBadge = `SWOOPING TO PIN ${targetBoat.id}`;
+                                if (this.y < targetBoat.y - 18) {
                                     this.luffing = true;
-                                    this.speedMatchCap = Math.max(1.8, targetBoat.speed * 0.72);
+                                    this.speedMatchCap = Math.max(1.35, targetBoat.speed * 0.62);
                                 }
                             } else {
                                 const tackSign = this.tack === 'STBD' ? -1 : 1;
-                                directManeuverHeading = wrapAngle180(effWindDir + tackSign * 38);
+                                directManeuverHeading = wrapAngle180(effWindDir + tackSign * 37);
                                 this.luffing = true;
-                                this.speedMatchCap = Math.max(1.6, targetBoat.speed * 0.94);
-                                this.roleBadge = `LOCKED PIN & PASSBACK ON ${targetBoat.id}!`;
+                                this.speedMatchCap = Math.max(1.25, targetBoat.speed * 0.86);
+                                this.roleBadge = `PASS-BACK LOCK: PINNING ${targetBoat.id}!`;
                             }
                         }
-                    } else if (isDownwind && dTarget < 220) {
+                    } else if ((this.leg === 2 || this.leg === 4) && dTarget < 235) {
+                        // Open Reach Pass-Back (Hook to Leeward & Luff High so Beneficiary sails low rhumb line)
+                        const luffY = targetBoat.y - 34;
+                        const luffX = targetBoat.x + 14;
+                        directManeuverHeading = radToDeg(Math.atan2(luffX - this.x, -(luffY - this.y)));
+                        this.luffing = true;
+                        this.speedMatchCap = Math.max(1.5, targetBoat.speed * 0.82);
+                        this.roleBadge = `REACH PASS-BACK: LUFFING ${targetBoat.id} HIGH!`;
+                    } else if (isDownwind && dTarget < 235) {
                         const r17Restricted = gameState.r17PairMatrix[`${this.id}_${targetBoat.id}`];
                         if (r17Restricted) {
                             directManeuverHeading = getProperCourseHeading(this, effWindDir);
@@ -1724,51 +2154,68 @@
                             if (this.tack === 'PORT' && this.aiTackCooldown <= 0) {
                                 this.triggerGybe();
                             }
-                            const hookSlotX = targetBoat.x - 24;
-                            const hookSlotY = targetBoat.y + 8;
+                            const hookSlotX = targetBoat.x - 22;
+                            const hookSlotY = targetBoat.y + 10;
                             const distToSlot = Math.hypot(hookSlotX - this.x, hookSlotY - this.y);
 
-                            if (distToSlot > 32 && this.y > targetBoat.y + 12) {
+                            if (distToSlot > 28 && this.y > targetBoat.y + 10) {
                                 directManeuverHeading = radToDeg(Math.atan2(hookSlotX - this.x, -(hookSlotY - this.y)));
                                 this.luffing = true;
-                                this.speedMatchCap = Math.max(1.8, targetBoat.speed * 0.72);
+                                this.speedMatchCap = Math.max(1.5, targetBoat.speed * 0.65);
                                 this.roleBadge = `SETTING DOWNWIND HOOK ON ${targetBoat.id}`;
                             } else {
-                                directManeuverHeading = wrapAngle180(effWindDir - 104);
+                                directManeuverHeading = wrapAngle180(effWindDir - 102);
                                 this.luffing = true;
-                                this.speedMatchCap = Math.max(2.0, targetBoat.speed * 0.95);
-                                this.roleBadge = `LUFFING ${targetBoat.id} OFF COURSE!`;
+                                this.speedMatchCap = Math.max(1.65, targetBoat.speed * 0.88);
+                                this.roleBadge = `DOWNWIND PASS-BACK: LUFFING ${targetBoat.id}!`;
                             }
                         }
                     }
                 }
 
-                // JOB 3: PASS
+                // JOB 3: PASS (Beneficiary Teammate actively steers into the open lane opposite the trap/pass-back!)
                 else if (job === 'PASS' && targetBoat) {
                     const dBattle = distBetween(this, targetBoat);
 
-                    if (isUpwind && dBattle < 145) {
+                    if (distToMark < THREE_BL_RADIUS * 2.4 && dBattle < 210 && activeMark) {
+                        // Aim tightly for the inside mark-rounding lane while the Executor pushes the Victim wide!
+                        let insideWp = { x: rawWp.x, y: rawWp.y };
+                        if (this.leg === 1) insideWp = { x: COURSE.mark1.x - 26, y: COURSE.mark1.y - 16 };
+                        else if (this.leg === 2) insideWp = { x: COURSE.mark2.x + 24, y: COURSE.mark2.y - 22 };
+                        else if (this.leg === 3) insideWp = { x: COURSE.mark3.x - 24, y: COURSE.mark3.y + 24 };
+                        else if (this.leg === 4) insideWp = { x: COURSE.mark4.x + 24, y: COURSE.mark4.y + 22 };
+
+                        directManeuverHeading = radToDeg(Math.atan2(insideWp.x - this.x, -(insideWp.y - this.y)));
+                        this.luffing = false;
+                        this.speedFloor = 5.5;
+                        this.roleBadge = `SHOOTING INSIDE MARK TRAP!`;
+                    } else if (isUpwind && dBattle < 195) {
                         const horizSep = this.x - targetBoat.x;
                         const leewardDir = this.tack === 'STBD' ? -1 : 1;
-                        const isToLeeward = (horizSep * leewardDir) > 18;
+                        const isToLeeward = (horizSep * leewardDir) > 16;
 
-                        if (!isToLeeward && Math.abs(horizSep) < 42 && this.y > targetBoat.y && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                        if (!isToLeeward && Math.abs(horizSep) < 46 && this.y > targetBoat.y - 8 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
                             this.roleBadge = `PASSBACK 1: TACKING OUT FREE!`;
                             this.triggerTack();
                         } else {
+                            // Steer a fast, clean leeward lane (44° TWA) to foot underneath the slowed pair
                             const tackSign = this.tack === 'STBD' ? -1 : 1;
                             directManeuverHeading = wrapAngle180(effWindDir + tackSign * 44);
                             this.luffing = false;
-                            this.speedFloor = 5.2;
-                            this.roleBadge = `PASSBACK 2: OUT FROM UNDER!`;
+                            this.speedFloor = 5.4;
+                            this.roleBadge = `PASSBACK 2: FOOTING UNDERNEATH ${targetBoat.id}!`;
                         }
-                    } else if (distToMark < THREE_BL_RADIUS * 1.9 && dBattle < 140) {
+                    } else if ((this.leg === 2 || this.leg === 4) && dBattle < 200) {
+                        // Sail the low, fast inside line while teammate luffs opponent high
+                        const lowLaneY = rawWp.y + 18;
+                        directManeuverHeading = radToDeg(Math.atan2(rawWp.x - this.x, -(lowLaneY - this.y)));
+                        this.luffing = false;
+                        this.speedFloor = 5.8;
+                        this.roleBadge = `LOW LANE BYPASS ON ${targetBoat.id}!`;
+                    } else if (isDownwind && dBattle < 210) {
                         directManeuverHeading = radToDeg(Math.atan2(rawWp.x - this.x, -(rawWp.y - this.y)));
                         this.luffing = false;
-                        this.roleBadge = `SHOOTING INSIDE MARK TRAP!`;
-                    } else if (isDownwind && dBattle < 165) {
-                        directManeuverHeading = radToDeg(Math.atan2(rawWp.x - this.x, -(rawWp.y - this.y)));
-                        this.luffing = false;
+                        this.speedFloor = 5.5;
                         this.roleBadge = `RHUMB LINE PASS ON ${targetBoat.id}!`;
                     }
                 }
@@ -1847,6 +2294,7 @@
                 if (directManeuverHeading !== null) {
                     this.steerDirectly(directManeuverHeading, dt, 78);
                 } else if (isUpwind) {
+                    this.evaluateStrategicShiftAndLane(effWindDir, desiredCourse, isUpwind);
                     this.steerWithLaylines(desiredCourse, effWindDir, dt, this.leg === 5);
                 } else if (isDownwind) {
                     this.steerDownwindRun(desiredCourse, effWindDir, dt);
@@ -1937,8 +2385,8 @@
                 for (const other of gameState.boats) {
                     if (!other.activeInRace || other === this || other.finished) continue;
                     const d = distBetween(this, other);
-                    if (d < BOAT_LENGTH * 1.45) return false;
-                    if (this.inZone && other.team !== this.team && d < BOAT_LENGTH * 2.2) {
+                    if (d < BOAT_LENGTH * 1.75) return false;
+                    if (this.inZone && other.team !== this.team && d < BOAT_LENGTH * 2.4) {
                         return false;
                     }
                 }
@@ -1946,50 +2394,188 @@
             }
 
             applyRightOfWayAvoidance(effWindDir, dt, inActiveManeuver = false) {
+                const pxPerKnot = 14.2;
+                const myRad = degToRad(this.heading);
+                const myVx = Math.sin(myRad) * this.speed * pxPerKnot;
+                const myVy = -Math.cos(myRad) * this.speed * pxPerKnot;
+
+                // Check if any other boat is close to us right now
+                let nearestBoatDist = 9999;
+                for (const o of gameState.boats) {
+                    if (o !== this && o.activeInRace && !o.finished) {
+                        const d = distBetween(this, o);
+                        if (d < nearestBoatDist) nearestBoatDist = d;
+                    }
+                }
+                const inOpenWaterNearMark = (nearestBoatDist > BOAT_LENGTH * 2.1);
+
+                // 0. Proactive Tangent-Arc Mark & RC Boat Clearance (Prevents Rule 31 mark touches, especially when no boats are around!)
+                const marks = [COURSE.startPin, COURSE.startRC, COURSE.mark1, COURSE.mark2, COURSE.mark3, COURSE.mark4, COURSE.finishPin, COURSE.finishRC];
+                for (const m of marks) {
+                    if (!isMarkActiveForBoatUnderRule31(this, m)) continue;
+                    const dm = distBetween(this, m);
+                    // Give extra generous clearance when rounding uncontested in open water
+                    const baseMarkRadius = (m.isRC ? 28 : MARK_RADIUS);
+                    const safeClearance = baseMarkRadius + (inOpenWaterNearMark ? 38 : 28);
+
+                    if (dm < safeClearance + 32) {
+                        // Look ahead over 0.35s, 0.75s, and 1.15s along our velocity vector
+                        let willClipMark = (dm < safeClearance);
+                        for (const lookSec of [0.35, 0.75, 1.15]) {
+                            const predX = this.x + myVx * lookSec;
+                            const predY = this.y + myVy * lookSec;
+                            if (Math.hypot(predX - m.x, predY - m.y) < safeClearance) {
+                                willClipMark = true;
+                                break;
+                            }
+                        }
+
+                        if (willClipMark) {
+                            // Compute radial vector from mark to boat
+                            const radFromMark = Math.atan2(this.x - m.x, -(this.y - m.y));
+                            const degFromMark = radToDeg(radFromMark);
+
+                            // Choose tangent direction that respects the mark's required rounding side (Starboard = clockwise/+90°, Port = counter-clockwise/-90°)
+                            let tangentHeading;
+                            if (m.rounding === 'STBD') {
+                                tangentHeading = wrapAngle180(degFromMark + 78);
+                            } else if (m.rounding === 'PORT') {
+                                tangentHeading = wrapAngle180(degFromMark - 78);
+                            } else {
+                                // Start/Finish marks: pick the tangent closest to our current heading
+                                const t1 = wrapAngle180(degFromMark + 82);
+                                const t2 = wrapAngle180(degFromMark - 82);
+                                tangentHeading = Math.abs(angleDiff(t1, this.heading)) < Math.abs(angleDiff(t2, this.heading)) ? t1 : t2;
+                            }
+
+                            // If extremely close to the mark skin, blend outward radial push with tangent arc
+                            const urgency = dm < baseMarkRadius + 20 ? 1.35 : 1.0;
+                            const blendHeading = dm < baseMarkRadius + 18 ? degFromMark : tangentHeading;
+                            const diffM = angleDiff(blendHeading, this.heading);
+                            this.targetHeading = null;
+                            this.heading = wrapAngle180(this.heading + Math.sign(diffM || 1) * Math.min(Math.abs(diffM), 115 * urgency * dt));
+                            if (inOpenWaterNearMark) {
+                                this.roleBadge = `CLEAN ROUNDING CLEARANCE (${m.label.split(' ')[0]})`;
+                            }
+                            return;
+                        }
+                    }
+                }
+
                 for (const other of gameState.boats) {
                     if (!other.activeInRace || other === this || other.finished) continue;
                     const d = distBetween(this, other);
-                    if (d > BOAT_LENGTH * 2.2) continue;
+                    if (d > BOAT_LENGTH * 3.4) continue;
 
-                    if (other.team === this.team && this.tack !== other.tack && (this.leg === 1 || this.leg === 5)) {
-                        if (this.aiTackCooldown <= 0 && d < BOAT_LENGTH * 1.85) {
-                            this.roleBadge = `SWITCH TACK W/ ${other.id}`;
-                            this.triggerTack();
-                            if (!other.isPlayer && other.aiTackCooldown <= 0) other.triggerTack();
+                    const otherRad = degToRad(other.heading);
+                    const otherVx = Math.sin(otherRad) * other.speed * pxPerKnot;
+                    const otherVy = -Math.cos(otherRad) * other.speed * pxPerKnot;
+
+                    // Compute Closest Point of Approach (CPA) over the next 2.1 seconds
+                    const rvx = otherVx - myVx;
+                    const rvy = otherVy - myVy;
+                    const rx = other.x - this.x;
+                    const ry = other.y - this.y;
+                    const rvSq = rvx * rvx + rvy * rvy;
+                    let tCPA = rvSq > 1 ? -(rx * rvx + ry * rvy) / rvSq : 0;
+                    tCPA = Math.max(0, Math.min(2.1, tCPA));
+                    const cpaX = rx + rvx * tCPA;
+                    const cpaY = ry + rvy * tCPA;
+                    const cpaDist = Math.hypot(cpaX, cpaY);
+
+                    // 1. NEVER collide with a teammate (Always non-beneficial!)
+                    if (other.team === this.team) {
+                        if (this.tack !== other.tack && (this.leg === 1 || this.leg === 5)) {
+                            if (this.aiTackCooldown <= 0 && (d < BOAT_LENGTH * 2.2 || cpaDist < BOAT_LENGTH * 1.35)) {
+                                this.roleBadge = `SWITCH TACK W/ ${other.id}`;
+                                this.triggerTack();
+                                if (!other.isPlayer && other.aiTackCooldown <= 0) other.triggerTack();
+                                return;
+                            }
+                        }
+                        if (d < BOAT_LENGTH * 1.6 || (tCPA > 0.1 && cpaDist < BOAT_LENGTH * 1.25)) {
+                            const awayFromTeammate = radToDeg(Math.atan2(this.x - other.x, -(this.y - other.y)));
+                            const diff = angleDiff(awayFromTeammate, this.heading);
+                            this.heading = wrapAngle180(this.heading + Math.sign(diff || 1) * 88 * dt);
+                            if (d < BOAT_LENGTH * 1.25 && this.y > other.y) {
+                                this.speedMatchCap = Math.min(this.speedMatchCap ?? 99, other.speed * 0.85);
+                            }
                             return;
                         }
                     }
 
+                    // 2. Predictive RRS Adjudication & CPA Keep-Clear Buffer:
+                    const hypotheticalDecision = adjudicateBoatToBoatIncident(this, other);
+                    const iWouldBePenalized = (hypotheticalDecision.fouledBoat === this);
+
+                    // Rule 18 Inside Mark-Room Give-Room Avoidance
                     if (this.inZone && other.inZone && this.leg === other.leg) {
                         const pairRel = getRule18PairStatus(this, other);
-                        if (pairRel && pairRel.giveRoomId === this.id && d < BOAT_LENGTH * 1.35) {
+                        if (pairRel && pairRel.giveRoomId === this.id && (d < BOAT_LENGTH * 1.75 || cpaDist < BOAT_LENGTH * 1.35)) {
                             const activeMark = this.getActiveRoundingMark();
                             if (activeMark) {
                                 const awayFromMark = radToDeg(Math.atan2(this.x - activeMark.x, -(this.y - activeMark.y)));
                                 const diff = angleDiff(awayFromMark, this.heading);
-                                this.heading = wrapAngle180(this.heading + Math.sign(diff) * 65 * dt);
+                                this.heading = wrapAngle180(this.heading + Math.sign(diff || 1) * 86 * dt);
+                                this.speedMatchCap = Math.min(this.speedMatchCap ?? 99, other.speed * 0.88);
                                 this.roleBadge = `GIVING MARK-ROOM TO ${other.id}`;
                                 return;
                             }
                         }
                     }
 
+                    // Port-tack ducking or Lee-Bow tacking before Starboard-tack boat (RRS 10)
                     if (this.tack === 'PORT' && other.tack === 'STBD' && !other.spinning && !(other.ocs && other.y < COURSE.startPin.y)) {
                         const bearingToOther = radToDeg(Math.atan2(other.x - this.x, -(other.y - this.y)));
-                        if (Math.abs(angleDiff(bearingToOther, this.heading)) < 52 && d < BOAT_LENGTH * 1.9) {
-                            this.roleBadge = `DUCKING ${other.id} (R10)`;
-                            this.heading = wrapAngle180(this.heading + 85 * dt);
+                        if (Math.abs(angleDiff(bearingToOther, this.heading)) < 68 && (d < BOAT_LENGTH * 2.6 || cpaDist < BOAT_LENGTH * 1.45)) {
+                            // If we are slightly ahead on the beat and have room to lee-bow tack onto Starboard, do so cleanly!
+                            if ((this.leg === 1 || this.leg === 5) && this.y < other.y - 12 && d > BOAT_LENGTH * 1.65 && this.aiTackCooldown <= 0 && this.canSafelyTack()) {
+                                this.roleBadge = `LEE-BOW TACK ON ${other.id}!`;
+                                this.triggerTack();
+                                return;
+                            }
+                            // Otherwise duck cleanly behind the Starboard boat's stern
+                            const sternX = other.x - Math.sin(otherRad) * (BOAT_LENGTH * 1.15);
+                            const sternY = other.y + Math.cos(otherRad) * (BOAT_LENGTH * 1.15);
+                            const duckHeading = radToDeg(Math.atan2(sternX - this.x, -(sternY - this.y)));
+                            this.steerDirectly(duckHeading, dt, 98);
+                            this.roleBadge = `DUCKING ${other.id} STERN (R10)`;
                             return;
                         }
                     }
 
-                    const wLThreshold = inActiveManeuver ? BOAT_LENGTH * 0.88 : BOAT_LENGTH * 1.25;
-                    if (this.tack === other.tack && d < wLThreshold) {
+                    // Windward keeping clear of Leeward (RRS 11) — maintains a clean 1.25-BL cushion even while pinning!
+                    const wLThreshold = inActiveManeuver ? BOAT_LENGTH * 1.28 : BOAT_LENGTH * 1.55;
+                    if (this.tack === other.tack && (d < wLThreshold || (iWouldBePenalized && cpaDist < BOAT_LENGTH * 1.22))) {
                         const wl = getWindwardLeewardRelation(this, other, effWindDir);
                         if (wl.windward === this) {
                             const sign = this.tack === 'STBD' ? -1 : 1;
-                            this.heading = wrapAngle180(this.heading - sign * 62 * dt);
+                            this.heading = wrapAngle180(this.heading - sign * 84 * dt);
+                            if (d < BOAT_LENGTH * 1.18) {
+                                this.luffing = true;
+                                this.speedMatchCap = Math.min(this.speedMatchCap ?? 99, other.speed * 0.88);
+                            }
+                            return;
                         }
+                    }
+
+                    // Clear Astern avoiding running into Clear Ahead's transom (RRS 12)
+                    if (iWouldBePenalized && (d < BOAT_LENGTH * 1.45 || cpaDist < BOAT_LENGTH * 1.18)) {
+                        const awayAngle = radToDeg(Math.atan2(this.x - other.x, -(this.y - other.y)));
+                        const diff = angleDiff(awayAngle, this.heading);
+                        this.heading = wrapAngle180(this.heading + Math.sign(diff || 1) * 86 * dt);
+                        if (d < BOAT_LENGTH * 1.25) {
+                            this.luffing = true;
+                            this.speedMatchCap = Math.min(this.speedMatchCap ?? 99, other.speed * 0.82);
+                        }
+                        return;
+                    }
+
+                    // Rule 14: Right-of-Way Boat Last-Second Contact Avoidance (Don't let a trapped/slow opponent T-bone us and scrub our speed)
+                    if (!iWouldBePenalized && (d < BOAT_LENGTH * 1.08 || (tCPA < 0.7 && cpaDist < BOAT_LENGTH * 0.88))) {
+                        const awayAngle = radToDeg(Math.atan2(this.x - other.x, -(this.y - other.y)));
+                        const diff = angleDiff(awayAngle, this.heading);
+                        this.heading = wrapAngle180(this.heading + Math.sign(diff || 1) * 72 * dt);
                     }
                 }
             }
@@ -2013,64 +2599,97 @@
                             this.leg = 1;
                             this.markApproachStage = 0;
                             if (this.isPlayer) {
-                                showToast(`✅ ${this.id} started cleanly! Head to Mark 1.`);
+                                showToast(`✅ ${this.id} started cleanly! Round M1 to Starboard.`);
                             }
                         }
                     }
                 } else if (this.leg === 1) {
+                    // Mark 1 (Windward Mark - Leave to STARBOARD):
+                    // Must pass West of M1 going North (Stage 1), then cross North of M1 going East (Stage 2).
                     const m = COURSE.mark1;
-                    if (this.markApproachStage === 0 && this.y < m.y + 22 && this.x < m.x + 28) {
+                    // If boat sailed East of M1 without going above it (wrong side!), reset stage and warn player
+                    if (this.markApproachStage === 0 && this.y < m.y && this.x > m.x + 12 && this.prevY >= m.y) {
+                        if (this.isPlayer) {
+                            showToast(`⚠️ Rule 28: Leave Mark 1 to STARBOARD (pass West, then North of M1)!`);
+                        }
+                    }
+                    if (this.markApproachStage === 0 && this.x < m.x && this.y <= m.y + 10) {
                         this.markApproachStage = 1;
                     }
-                    if (this.markApproachStage === 1 && this.x > m.x && this.y < m.y + 42) {
+                    if (this.markApproachStage === 1 && this.y < m.y && this.x >= m.x) {
                         if (this.penalties > 0 && this.isPlayer) {
                             showToast(`⚠️ ${this.id} has an active penalty! Press [P] to spin before advancing!`);
                         } else {
                             this.leg = 2;
                             this.markApproachStage = 0;
                             clearRule18PairsForBoat(this.id, 1);
+                            if (this.isPlayer) showToast(`✅ M1 rounded to Starboard! Reach to M2 (leave to Starboard).`);
                         }
                     }
                 } else if (this.leg === 2) {
+                    // Mark 2 (Top Offset Mark - Leave to STARBOARD):
+                    // Must pass North of M2 going East (Stage 1), then cross East of M2 going South (Stage 2).
                     const m = COURSE.mark2;
-                    if (this.markApproachStage === 0 && this.x > m.x - 20 && this.y < m.y + 25) {
+                    if (this.markApproachStage === 0 && this.x > m.x && this.y > m.y + 12 && this.prevX <= m.x) {
+                        if (this.isPlayer) {
+                            showToast(`⚠️ Rule 28: Leave Mark 2 to STARBOARD (pass North, then East of M2)!`);
+                        }
+                    }
+                    if (this.markApproachStage === 0 && this.y < m.y && this.x >= m.x - 10) {
                         this.markApproachStage = 1;
                     }
-                    if (this.markApproachStage === 1 && this.y > m.y && this.x > m.x - 25) {
+                    if (this.markApproachStage === 1 && this.x > m.x && this.y >= m.y) {
                         if (this.penalties > 0 && this.isPlayer) {
                             showToast(`⚠️ ${this.id} has an active penalty! Press [P] to spin before advancing!`);
                         } else {
                             this.leg = 3;
                             this.markApproachStage = 0;
                             clearRule18PairsForBoat(this.id, 2);
+                            if (this.isPlayer) showToast(`✅ M2 rounded to Starboard! Run to M3 (leave to Port).`);
                         }
                     }
                 } else if (this.leg === 3) {
+                    // Mark 3 (Leeward Mark - Leave to PORT):
+                    // Must pass West of M3 going South (Stage 1), then cross South of M3 going East (Stage 2).
                     const m = COURSE.mark3;
-                    if (this.markApproachStage === 0 && this.y > m.y - 25 && this.x < m.x + 25) {
+                    if (this.markApproachStage === 0 && this.y > m.y && this.x > m.x + 12 && this.prevY <= m.y) {
+                        if (this.isPlayer) {
+                            showToast(`⚠️ Rule 28: Leave Mark 3 to PORT (pass West, then South of M3)!`);
+                        }
+                    }
+                    if (this.markApproachStage === 0 && this.x < m.x && this.y >= m.y - 10) {
                         this.markApproachStage = 1;
                     }
-                    if (this.markApproachStage === 1 && this.x > m.x && this.y > m.y - 28) {
+                    if (this.markApproachStage === 1 && this.y > m.y && this.x >= m.x) {
                         if (this.penalties > 0 && this.isPlayer) {
                             showToast(`⚠️ ${this.id} has an active penalty! Press [P] to spin before advancing!`);
                         } else {
                             this.leg = 4;
                             this.markApproachStage = 0;
                             clearRule18PairsForBoat(this.id, 3);
+                            if (this.isPlayer) showToast(`✅ M3 rounded to Port! Reach to M4 (leave to Port).`);
                         }
                     }
                 } else if (this.leg === 4) {
+                    // Mark 4 (Leeward Offset Mark - Leave to PORT):
+                    // Must pass South of M4 going East (Stage 1), then cross East of M4 going North (Stage 2).
                     const m = COURSE.mark4;
-                    if (this.markApproachStage === 0 && this.x > m.x - 25 && this.y > m.y - 25) {
+                    if (this.markApproachStage === 0 && this.x > m.x && this.y < m.y - 12 && this.prevX <= m.x) {
+                        if (this.isPlayer) {
+                            showToast(`⚠️ Rule 28: Leave Mark 4 to PORT (pass South, then East of M4)!`);
+                        }
+                    }
+                    if (this.markApproachStage === 0 && this.y > m.y && this.x >= m.x - 10) {
                         this.markApproachStage = 1;
                     }
-                    if (this.markApproachStage === 1 && this.y < m.y && this.x > m.x - 25) {
+                    if (this.markApproachStage === 1 && this.x > m.x && this.y <= m.y) {
                         if (this.penalties > 0 && this.isPlayer) {
                             showToast(`⚠️ ${this.id} has an active penalty! Press [P] to spin before advancing!`);
                         } else {
                             this.leg = 5;
                             this.markApproachStage = 0;
                             clearRule18PairsForBoat(this.id, 4);
+                            if (this.isPlayer) showToast(`✅ M4 rounded to Port! Final beat to the Finish Line!`);
                         }
                     }
                 } else if (this.leg === 5) {
@@ -2746,20 +3365,48 @@
 
             const activeBoats = gameState.boats.filter(b => b.activeInRace);
             const finishedCount = activeBoats.filter(b => b.finished).length;
-            if (gameState.phase === 'RACING' && activeBoats.length > 0 && finishedCount >= activeBoats.length) {
-                gameState.phase = 'FINISHED';
-                gameState.running = false;
-                showFinishModal(sorted);
+
+            // Start 90-second Finishing Window as soon as the 1st boat crosses the finish line
+            if (gameState.phase === 'RACING' && finishedCount > 0 && gameState.finishWindowTimer === null) {
+                gameState.finishWindowTimer = 90.0;
+                showToast('⏱️ First boat finished! 90-second Finishing Window started!');
+                logRadio('RC', 'BLUE', 'First boat finished — 90s Finishing Window active (Finish in Place after 90s).');
+            }
+
+            if (gameState.phase === 'RACING' && gameState.finishWindowTimer !== null) {
+                if (!isPartyGuest) {
+                    gameState.finishWindowTimer = Math.max(0, gameState.finishWindowTimer - dt);
+                } else if (mpState.hostRaceState && mpState.hostRaceState.finishWindowTimer !== undefined) {
+                    gameState.finishWindowTimer = mpState.hostRaceState.finishWindowTimer;
+                }
+            }
+
+            // Check if a team has mathematically clinched the match (e.g., 1-2, 1-3, 2-3-4 finished)
+            if (gameState.phase === 'RACING' && finishedCount > 0) {
+                const clinch = evaluateMatchClincherAndWindow(sorted);
+                if (clinch && clinch.clinched) {
+                    showToast(`🏆 ${clinch.reason}`);
+                    logRadio('RC', clinch.winner, clinch.reason);
+                    finalizeRemainingBoatsInPlace(sorted, clinch.reason);
+                } else if (finishedCount >= activeBoats.length) {
+                    finalizeRemainingBoatsInPlace(sorted, 'All Boats Finished');
+                } else if (gameState.finishWindowTimer !== null && gameState.finishWindowTimer <= 0) {
+                    const msg = '⏰ 90s Finishing Window Expired — Remaining Boats Scored Finish-in-Place!';
+                    showToast(msg);
+                    logRadio('RC', 'BLUE', msg);
+                    finalizeRemainingBoatsInPlace(sorted, msg);
+                }
             }
 
             if (window.syncLocalBoatToParty) {
                 window.syncLocalBoatToParty();
             }
 
+            // Smooth Boat-Centered Camera Follow (no swinging on turns/tacks)
             const player = gameState.boats.find(b => b.isPlayer && b.activeInRace) || gameState.boats[0];
             if (config.cameraFollow && player) {
-                gameState.camera.x += (player.x - gameState.camera.x) * Math.min(1, dt * 6);
-                gameState.camera.y += (player.y - gameState.camera.y) * Math.min(1, dt * 6);
+                gameState.camera.x += (player.x - gameState.camera.x) * Math.min(1, dt * 7);
+                gameState.camera.y += (player.y - gameState.camera.y) * Math.min(1, dt * 7);
                 gameState.camera.zoom += (config.userZoom - gameState.camera.zoom) * Math.min(1, dt * 7);
             } else {
                 const overviewZoom = Math.min(canvas.width / (WORLD_WIDTH * 1.02), canvas.height / (WORLD_HEIGHT * 1.02));
@@ -2790,6 +3437,7 @@
             renderCourseAndZones();
             if (config.showOverlays) {
                 renderWindShadowsAndPlumes();
+                renderCoordinatedTrioLinks();
             }
             renderWakes();
 
@@ -3009,6 +3657,47 @@
             }
         }
 
+        function renderCoordinatedTrioLinks() {
+            const trios = gameState.playbookState.activeTrios || [];
+            if (trios.length === 0) return;
+
+            for (const trio of trios) {
+                const exec = gameState.boats.find(b => b.id === trio.executorId && b.activeInRace && !b.finished);
+                const victim = gameState.boats.find(b => b.id === trio.victimId && b.activeInRace && !b.finished);
+                const ben = trio.beneficiaryId ? gameState.boats.find(b => b.id === trio.beneficiaryId && b.activeInRace && !b.finished) : null;
+                if (!exec || !victim) continue;
+
+                ctx.save();
+                // 1. Red dashed attack vector from Executor to Victim
+                ctx.strokeStyle = 'rgba(251, 191, 36, 0.65)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.moveTo(exec.x, exec.y);
+                ctx.lineTo(victim.x, victim.y);
+                ctx.stroke();
+
+                // Target ring around Victim
+                ctx.beginPath();
+                ctx.arc(victim.x, victim.y, 26, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(244, 63, 94, 0.55)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // 2. Green passing lane link from Beneficiary through the gap
+                if (ben) {
+                    ctx.strokeStyle = 'rgba(52, 211, 153, 0.65)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(ben.x, ben.y);
+                    ctx.lineTo(exec.x, exec.y);
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+        }
+
         function renderWakes() {
             for (const b of gameState.boats) {
                 if (!b.activeInRace || b.wake.length < 2) continue;
@@ -3057,25 +3746,103 @@
             ctx.roundRect(-5, -6, 10, 20, 3);
             ctx.fill();
 
-            // Mainsail & Jib
-            const boomSide = b.tack === 'STBD' ? 1 : -1;
-            const sailEase = Math.min(72, Math.max(14, (b.twa - 32) * 0.52));
-            const mainAngle = degToRad(boomSide * sailEase);
+            // Centerboard / Thwart detail
+            ctx.strokeStyle = 'rgba(248, 250, 252, 0.35)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(-5, 0);
+            ctx.lineTo(5, 0);
+            ctx.moveTo(0, -4);
+            ctx.lineTo(0, 8);
+            ctx.stroke();
 
+            // Realistic C420 Mainsail & Jib Airfoils
+            // In local boat coordinates: bow is (0, -22), stern is (0, +20), port is (-x), starboard is (+x).
+            // Rotating a vector (0, +L) pointing toward the stern by positive angle +theta moves its tip to (-L*sin(theta), +L*cos(theta)) -> PORT (-x)!
+            // Rotating (0, +L) by negative angle -theta moves its tip to (+L*sin(theta), +L*cos(theta)) -> STARBOARD (+x)!
+            // Therefore:
+            // - On Starboard tack (wind coming over Starboard/+x side), the boom & sails go to PORT (-x): rotSign = +1, and airfoil belly is toward -x (camberSign = -1).
+            // - On Port tack (wind coming over Port/-x side), the boom & sails go to STARBOARD (+x): rotSign = -1, and airfoil belly is toward +x (camberSign = +1).
+            const rotSign = b.tack === 'STBD' ? 1 : -1;
+            const camberSign = -rotSign;
+            const sailEaseDeg = Math.min(76, Math.max(13, (b.twa - 30) * 0.54));
+            const mainAngle = degToRad(rotSign * sailEaseDeg);
+            const jibAngle = degToRad(rotSign * Math.max(10, sailEaseDeg * 0.78));
+            const isFlapping = b.luffing || b.twa < 28;
+            const flapWave = isFlapping ? Math.sin(performance.now() * 0.032 + b.x) * 3.8 : 0;
+
+            // 1. Foresail (Jib) from Bow (0, -21) to Leeward Shroud
             ctx.save();
-            ctx.translate(0, -6);
-            ctx.rotate(mainAngle);
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2.6;
+            ctx.translate(0, -21);
+            ctx.rotate(jibAngle);
+            const jibFoot = 12.5;
+            const jibCamber = isFlapping ? flapWave : (camberSign * 3.6);
+
+            // Soft leeward airfoil fill
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
             ctx.beginPath();
             ctx.moveTo(0, 0);
-            if (b.luffing || b.twa < 28) {
-                const wave = Math.sin(performance.now() * 0.025) * 4;
-                ctx.quadraticCurveTo(wave, 11, 0, 22);
-            } else {
-                ctx.quadraticCurveTo(boomSide * 5.5, 11, 0, 22);
-            }
+            ctx.quadraticCurveTo(jibCamber, jibFoot * 0.48, 0, jibFoot);
+            ctx.closePath();
+            ctx.fill();
+
+            // Jib cloth curve
+            ctx.strokeStyle = '#f8fafc';
+            ctx.lineWidth = 2.0;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(jibCamber, jibFoot * 0.48, 0, jibFoot);
             ctx.stroke();
+            ctx.restore();
+
+            // 2. Mainsail & Boom from Mast step (0, -7)
+            ctx.save();
+            ctx.translate(0, -7);
+            ctx.rotate(mainAngle);
+            const boomLen = 23.5;
+            const mainCamber = isFlapping ? -flapWave * 1.15 : (camberSign * 6.4);
+
+            // Translucent mainsail airfoil belly (curves to leeward of the boom)
+            ctx.fillStyle = b.team === 'BLUE' ? 'rgba(219, 234, 254, 0.32)' : 'rgba(255, 228, 230, 0.32)';
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(mainCamber, boomLen * 0.44, 0, boomLen);
+            ctx.closePath();
+            ctx.fill();
+
+            // Aluminum Boom Spar (straight line from mast to clew)
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, boomLen);
+            ctx.stroke();
+
+            // Mainsail luff-to-leech airfoil curve & battens
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(mainCamber, boomLen * 0.44, 0, boomLen);
+            ctx.stroke();
+
+            // Battens across the mainsail pocket
+            if (!isFlapping) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+                ctx.lineWidth = 1.0;
+                ctx.beginPath();
+                ctx.moveTo(0, boomLen * 0.35);
+                ctx.lineTo(mainCamber * 0.46, boomLen * 0.35);
+                ctx.moveTo(0, boomLen * 0.65);
+                ctx.lineTo(mainCamber * 0.44, boomLen * 0.65);
+                ctx.stroke();
+            }
+
+            // Mast collar dot
+            ctx.fillStyle = '#e2e8f0';
+            ctx.beginPath();
+            ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+            ctx.fill();
             ctx.restore();
 
             ctx.restore();
@@ -3123,6 +3890,7 @@
         function updateTelemetryHUD(sorted, rankMap) {
             const phaseEl = document.getElementById('racePhaseLabel');
             const timerEl = document.getElementById('raceTimerDisplay');
+            const finWinEl = document.getElementById('finishWindowBadge');
             const legEl = document.getElementById('currentLegDisplay');
             const windEl = document.getElementById('windSummaryBadge');
 
@@ -3132,6 +3900,14 @@
                 const mins = Math.floor(absT / 60);
                 const secs = (absT % 60).toFixed(1).padStart(4, '0');
                 timerEl.textContent = `${mins}:${secs}`;
+            }
+            if (finWinEl) {
+                if (gameState.phase === 'RACING' && gameState.finishWindowTimer !== null) {
+                    finWinEl.classList.remove('hidden');
+                    finWinEl.textContent = `FIN WINDOW: ${gameState.finishWindowTimer.toFixed(1)}s`;
+                } else {
+                    finWinEl.classList.add('hidden');
+                }
             }
 
             const player = gameState.boats.find(b => b.isPlayer && b.activeInRace) || gameState.boats[0];
@@ -3182,6 +3958,23 @@
 
             if (playCall) {
                 playCall.textContent = gameState.playbookState.comboTitle || '3v3 RACE';
+            }
+
+            const triosBox = document.getElementById('activeCoordinatedPlaysBox');
+            if (triosBox) {
+                const trios = gameState.playbookState.activeTrios || [];
+                if (trios.length === 0) {
+                    triosBox.innerHTML = `<div class="text-slate-400 text-[10px]">No active trap/pass-back trios — sailing combination assignments</div>`;
+                } else {
+                    triosBox.innerHTML = trios.map(t => {
+                        const tCol = t.team === 'BLUE' ? 'text-blue-400' : 'text-rose-400';
+                        const benPart = t.beneficiaryId ? ` &rarr; <span class="text-emerald-400 font-extrabold">${t.beneficiaryId} PASSES</span>` : '';
+                        return `<div class="flex items-center justify-between">
+                            <span class="font-extrabold ${tCol}">${t.type}:</span>
+                            <span class="text-slate-200"><strong class="text-amber-300">${t.executorId}</strong> traps <strong class="text-rose-300">${t.victimId}</strong>${benPart}</span>
+                        </div>`;
+                    }).join('');
+                }
             }
 
             const matrixEl = document.getElementById('liveJobsMatrix');
@@ -3266,6 +4059,8 @@
 
             gameState.phase = 'PRESTART';
             gameState.timer = config.startLengthSec;
+            gameState.finishWindowTimer = null;
+            gameState.finishReason = '';
             gameState.finishOrder = [];
             gameState.radioLogs = [];
             gameState.collisionSparks = [];
@@ -3317,9 +4112,14 @@
 
         function showFinishModal(sortedBoats) {
             const modal = document.getElementById('finishModal');
+            const banner = document.getElementById('finishBannerBadge');
             const title = document.getElementById('finishWinnerTitle');
             const summary = document.getElementById('finishComboSummary');
             const table = document.getElementById('finishOrderTable');
+
+            if (banner) {
+                banner.textContent = gameState.finishReason || 'Regatta Complete';
+            }
 
             const bluePlaces = [];
             const redPlaces = [];
@@ -3365,6 +4165,8 @@
             const player = gameState.boats.find(b => b.isPlayer && b.activeInRace);
             if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.up = true;
             if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.down = true;
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = true;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = true;
             if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.luff = true;
 
             if (e.code === 'KeyT' && player && !e.repeat) player.triggerTack();
@@ -3382,6 +4184,8 @@
         window.addEventListener('keyup', (e) => {
             if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.up = false;
             if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.down = false;
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = false;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = false;
             if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.luff = false;
         });
 
@@ -3398,7 +4202,11 @@
             btn.addEventListener('pointerdown', () => { keys[keyProp] = true; });
             btn.addEventListener('pointerup', () => { keys[keyProp] = false; });
             btn.addEventListener('pointerleave', () => { keys[keyProp] = false; });
+            btn.addEventListener('pointercancel', () => { keys[keyProp] = false; });
         }
+
+        bindHoldButton('btnTurnLeft', 'left');
+        bindHoldButton('btnTurnRight', 'right');
         bindHoldButton('btnHeadUp', 'up');
         bindHoldButton('btnBearAway', 'down');
         bindHoldButton('btnLuff', 'luff');
@@ -3454,6 +4262,60 @@
                 startNewRegatta();
             }
         });
+
+        // Start Screen Mode Tabs (Singleplayer vs Multiplayer Party)
+        const tabSingleBtn = document.getElementById('tabSingleplayerBtn');
+        const tabMultiBtn = document.getElementById('tabMultiplayerBtn');
+        const singlePane = document.getElementById('singleplayerPane');
+        const multiPane = document.getElementById('multiplayerPane');
+
+        window.switchStartScreenTab = function(mode) {
+            if (mode === 'multi') {
+                singlePane.classList.add('hidden');
+                multiPane.classList.remove('hidden');
+                tabMultiBtn.className = 'py-2.5 px-4 rounded-lg font-extrabold text-xs sm:text-sm transition flex items-center justify-center gap-2 bg-sky-600 text-white shadow';
+                tabSingleBtn.className = 'py-2.5 px-4 rounded-lg font-extrabold text-xs sm:text-sm transition flex items-center justify-center gap-2 text-slate-400 hover:text-white';
+            } else {
+                multiPane.classList.add('hidden');
+                singlePane.classList.remove('hidden');
+                tabSingleBtn.className = 'py-2.5 px-4 rounded-lg font-extrabold text-xs sm:text-sm transition flex items-center justify-center gap-2 bg-sky-600 text-white shadow';
+                tabMultiBtn.className = 'py-2.5 px-4 rounded-lg font-extrabold text-xs sm:text-sm transition flex items-center justify-center gap-2 text-slate-400 hover:text-white';
+            }
+        };
+
+        if (tabSingleBtn && tabMultiBtn) {
+            tabSingleBtn.addEventListener('click', () => window.switchStartScreenTab('single'));
+            tabMultiBtn.addEventListener('click', () => window.switchStartScreenTab('multi'));
+        }
+
+        // Quick Solo Boat Picker Buttons on the Start Screen
+        function updateSoloBoatPickerUI() {
+            document.querySelectorAll('#soloBoatPickerGroup [data-pick-boat]').forEach(btn => {
+                const bId = btn.getAttribute('data-pick-boat');
+                const isSelected = (bId === config.playerBoatId);
+                const isBlue = bId.startsWith('B');
+                if (isSelected) {
+                    btn.className = `solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border ${isBlue ? 'border-blue-300 bg-blue-600 text-white shadow-lg' : 'border-rose-300 bg-rose-600 text-white shadow-lg'}`;
+                } else {
+                    btn.className = `solo-boat-btn py-2.5 px-2 rounded-lg text-xs font-extrabold mono border ${isBlue ? 'border-blue-500/40 bg-blue-950/50 text-blue-300 hover:bg-blue-900/60' : 'border-rose-500/40 bg-rose-950/50 text-rose-300 hover:bg-rose-900/60'}`;
+                }
+            });
+            const headerBadge = document.getElementById('selectedBoatHeaderBadge');
+            if (headerBadge) {
+                const isBlue = config.playerBoatId.startsWith('B');
+                headerBadge.textContent = `${isBlue ? 'BLUE' : 'RED'} (${config.playerBoatId})`;
+                headerBadge.className = `text-sm font-extrabold mono ${isBlue ? 'text-blue-400' : 'text-rose-400'}`;
+            }
+        }
+
+        document.querySelectorAll('#soloBoatPickerGroup [data-pick-boat]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const bId = btn.getAttribute('data-pick-boat');
+                config.playerBoatId = bId;
+                updateSoloBoatPickerUI();
+            });
+        });
+        updateSoloBoatPickerUI();
 
         // Initialize Preview Scene Behind Start Screen
         initWindField(Date.now());
@@ -4334,6 +5196,7 @@
                     payload.hostRaceState = {
                         phase: gameState.phase,
                         timer: gameState.timer,
+                        finishWindowTimer: gameState.finishWindowTimer,
                         baseWindDir: gameState.baseWindDir,
                         baseWindSpeed: gameState.baseWindSpeed
                     };
