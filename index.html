@@ -702,50 +702,59 @@
         // ============================================================================
         // RRS 2025-2028 DEFINITIONS & GEOMETRY HELPERS
         // ============================================================================
-        function getBoatTrueTack(boat, windDir) {
+        function getBoatTrueTack(boat, windDir, usePreContactState = false) {
             // Under RRS Definitions (Leeward and Windward / Tack, Starboard or Port):
             // A boat is on the tack (Starboard or Port) corresponding to her windward side.
-            // When wind comes from 0° (North), heading 318° (-42°) has wind on Starboard side -> STBD tack.
-            const relWind = wrapAngle180(boat.heading - windDir);
-            if (Math.abs(relWind) < 2.0) {
-                return boat.tack || 'STBD';
+            // Use pre-contact heading & tack when adjudicating a collision so collision bounce/spin
+            // never flips a Starboard boat onto Port (or vice versa) during the umpire call.
+            const hdg = (usePreContactState && boat.prevHeading !== undefined) ? boat.prevHeading : boat.heading;
+            const fallbackTack = (usePreContactState && boat.prevTack) ? boat.prevTack : (boat.tack || 'STBD');
+            const relWind = wrapAngle180(hdg - windDir);
+            if (Math.abs(relWind) < 4.5) {
+                return fallbackTack;
             }
             return relWind <= 0 ? 'STBD' : 'PORT';
         }
 
-        function getHullRelation(boatA, boatB) {
+        function getHullRelation(boatA, boatB, usePreContactState = false) {
             // RRS Definition: Clear Astern and Clear Ahead; Overlap
             // One boat is clear astern of another when her hull and equipment in normal position
             // are behind a line abeam from the aftermost point of the other boat's hull.
-            const radA = degToRad(boatA.heading);
+            const ax = (usePreContactState && boatA.prevX !== undefined) ? boatA.prevX : boatA.x;
+            const ay = (usePreContactState && boatA.prevY !== undefined) ? boatA.prevY : boatA.y;
+            const aHdg = (usePreContactState && boatA.prevHeading !== undefined) ? boatA.prevHeading : boatA.heading;
+
+            const bx = (usePreContactState && boatB.prevX !== undefined) ? boatB.prevX : boatB.x;
+            const by = (usePreContactState && boatB.prevY !== undefined) ? boatB.prevY : boatB.y;
+            const bHdg = (usePreContactState && boatB.prevHeading !== undefined) ? boatB.prevHeading : boatB.heading;
+
+            const radA = degToRad(aHdg);
             const fwdAx = Math.sin(radA);
             const fwdAy = -Math.cos(radA);
-            const dxAB = boatB.x - boatA.x;
-            const dyAB = boatB.y - boatA.y;
 
-            const radB = degToRad(boatB.heading);
+            const radB = degToRad(bHdg);
             const fwdBx = Math.sin(radB);
             const fwdBy = -Math.cos(radB);
 
             const halfHull = BOAT_LENGTH * 0.50;
-            const bowAx = boatA.x + fwdAx * halfHull;
-            const bowAy = boatA.y + fwdAy * halfHull;
-            const sternAx = boatA.x - fwdAx * halfHull;
-            const sternAy = boatA.y - fwdAy * halfHull;
+            const bowAx = ax + fwdAx * halfHull;
+            const bowAy = ay + fwdAy * halfHull;
+            const sternAx = ax - fwdAx * halfHull;
+            const sternAy = ay - fwdAy * halfHull;
 
-            const bowBx = boatB.x + fwdBx * halfHull;
-            const bowBy = boatB.y + fwdBy * halfHull;
-            const sternBx = boatB.x - fwdBx * halfHull;
-            const sternBy = boatB.y - fwdBy * halfHull;
+            const bowBx = bx + fwdBx * halfHull;
+            const bowBy = by + fwdBy * halfHull;
+            const sternBx = bx - fwdBx * halfHull;
+            const sternBy = by - fwdBy * halfHull;
 
             // Project all of Boat A's extremities onto Boat B's fore-and-aft centerline relative to B's stern
             const projBowA_on_B = (bowAx - sternBx) * fwdBx + (bowAy - sternBy) * fwdBy;
-            const projCenterA_on_B = (boatA.x - sternBx) * fwdBx + (boatA.y - sternBy) * fwdBy;
+            const projCenterA_on_B = (ax - sternBx) * fwdBx + (ay - sternBy) * fwdBy;
             const projSternA_on_B = (sternAx - sternBx) * fwdBx + (sternAy - sternBy) * fwdBy;
 
             // Project all of Boat B's extremities onto Boat A's fore-and-aft centerline relative to A's stern
             const projBowB_on_A = (bowBx - sternAx) * fwdAx + (bowBy - sternAy) * fwdAy;
-            const projCenterB_on_A = (boatB.x - sternAx) * fwdAx + (boatB.y - sternAy) * fwdAy;
+            const projCenterB_on_A = (bx - sternAx) * fwdAx + (by - sternAy) * fwdAy;
             const projSternB_on_A = (sternBx - sternAx) * fwdAx + (sternBy - sternAy) * fwdAy;
 
             const maxA_on_B = Math.max(projBowA_on_B, projCenterA_on_B, projSternA_on_B);
@@ -753,19 +762,17 @@
 
             const aClearAsternOfB = maxA_on_B < 2.0 && projBowB_on_A > halfHull;
             const bClearAsternOfA = maxB_on_A < 2.0 && projBowA_on_B > halfHull;
-            const overlapped = !aClearAsternOfB && !bClearAsternOfA && distBetween(boatA, boatB) < BOAT_LENGTH * 4.5;
+            const overlapped = !aClearAsternOfB && !bClearAsternOfA && Math.hypot(ax - bx, ay - by) < BOAT_LENGTH * 4.5;
 
-            // Check if physical contact occurs at the stern/transom of the ahead boat (for strict RRS Rule 12)
-            // Contact point approximated as midpoint of closest hull sections
-            const contactX = (boatA.x + boatB.x) * 0.5;
-            const contactY = (boatA.y + boatB.y) * 0.5;
-            // Longitudinal position of contact along B's hull (-halfHull is B's transom, +halfHull is B's bow)
-            const contactLongOnB = (contactX - boatB.x) * fwdBx + (contactY - boatB.y) * fwdBy;
-            // Longitudinal position of contact along A's hull (-halfHull is A's transom, +halfHull is A's bow)
-            const contactLongOnA = (contactX - boatA.x) * fwdAx + (contactY - boatA.y) * fwdAy;
+            // Strict Stern-Contact check (only when both boats are oriented in roughly the same direction and the bow of the astern boat strikes the transom of the ahead boat)
+            const headingAlignmentDot = fwdAx * fwdBx + fwdAy * fwdBy;
+            const bowA_to_sternB = Math.hypot(bowAx - sternBx, bowAy - sternBy);
+            const bowB_to_sternA = Math.hypot(bowBx - sternAx, bowBy - sternAy);
+            const bowA_to_centerB = Math.hypot(bowAx - bx, bowAy - by);
+            const bowB_to_centerA = Math.hypot(bowBx - ax, bowBy - ay);
 
-            const aHitBStern = (contactLongOnB <= -BOAT_LENGTH * 0.14) && (contactLongOnA >= 0);
-            const bHitAStern = (contactLongOnA <= -BOAT_LENGTH * 0.14) && (contactLongOnB >= 0);
+            const aHitBStern = headingAlignmentDot > 0.55 && aClearAsternOfB && (bowA_to_sternB < BOAT_BEAM * 1.15) && (bowA_to_sternB < bowA_to_centerB);
+            const bHitAStern = headingAlignmentDot > 0.55 && bClearAsternOfA && (bowB_to_sternA < BOAT_BEAM * 1.15) && (bowB_to_sternA < bowB_to_centerA);
 
             return {
                 aClearAsternOfB,
@@ -778,11 +785,16 @@
             };
         }
 
-        function getWindwardLeewardRelation(boatA, boatB, windDir) {
+        function getWindwardLeewardRelation(boatA, boatB, windDir, usePreContactState = false) {
             // RRS Definition: Leeward and Windward
             // A boat's leeward side is the side that is or, when she is head to wind, was away from the wind.
             // When two boats on the same tack overlap, the one on the leeward side of the other is the leeward boat.
-            const tackA = getBoatTrueTack(boatA, windDir);
+            const tackA = getBoatTrueTack(boatA, windDir, usePreContactState);
+            const ax = (usePreContactState && boatA.prevX !== undefined) ? boatA.prevX : boatA.x;
+            const ay = (usePreContactState && boatA.prevY !== undefined) ? boatA.prevY : boatA.y;
+            const bx = (usePreContactState && boatB.prevX !== undefined) ? boatB.prevX : boatB.x;
+            const by = (usePreContactState && boatB.prevY !== undefined) ? boatB.prevY : boatB.y;
+
             const wRad = degToRad(windDir);
             // Vector pointing toward Starboard when looking upwind (0° wind -> +x East)
             const stbdX = Math.cos(wRad);
@@ -798,8 +810,8 @@
             const leeDirX = stbdX * leewardSign * 0.82 - upX * 0.57;
             const leeDirY = stbdY * leewardSign * 0.82 - upY * 0.57;
 
-            const dxAB = boatB.x - boatA.x;
-            const dyAB = boatB.y - boatA.y;
+            const dxAB = bx - ax;
+            const dyAB = by - ay;
             const bLeewardProj = dxAB * leeDirX + dyAB * leeDirY;
 
             return bLeewardProj > 0
@@ -1649,6 +1661,7 @@
                 this.prevHeading = heading;
                 this.speed = 3.5;
                 this.tack = 'STBD';
+                this.prevTack = 'STBD';
                 this.twa = 42;
 
                 this.luffing = false;
@@ -1980,6 +1993,7 @@
                 this.prevX = this.x;
                 this.prevY = this.y;
                 this.prevHeading = this.heading;
+                this.prevTack = this.tack;
 
                 if (this.foulCooldown > 0) this.foulCooldown = Math.max(0, this.foulCooldown - dt);
                 if (this.justAcquiredRowTimer > 0) this.justAcquiredRowTimer = Math.max(0, this.justAcquiredRowTimer - dt);
@@ -2022,7 +2036,7 @@
 
                 // Velocity & Physics Integration
                 const polarSpd = getC420PolarSpeed(this.twa, localWind.speed);
-                const dirtyAirMult = Math.max(0.56, 1 - this.shadowFactor * 0.42);
+                const dirtyAirMult = Math.max(0.38, 1 - this.shadowFactor * 0.62);
                 const luffMult = this.luffing ? 0.34 : 1.0;
                 let targetSpd = polarSpd * dirtyAirMult * luffMult;
 
@@ -2200,8 +2214,8 @@
                     }
 
                     const slotIdx = ['B1', 'R1', 'B2', 'R2', 'B3', 'R3'].indexOf(this.id);
-                    const targetX = COURSE.startPin.x + 60 + (slotIdx >= 0 ? slotIdx * 76 : 180);
-                    const holdY = COURSE.startPin.y + 52 + (slotIdx % 2) * 26;
+                    const targetX = COURSE.startPin.x + 88 + (slotIdx >= 0 ? slotIdx * 68 : 180);
+                    const holdY = COURSE.startPin.y + 58 + (slotIdx % 2) * 26;
                     this.roleBadge = 'PRE-START HOLD';
 
                     // Check immediate personal space bubble in pre-start so bots don't bunch up
@@ -2247,11 +2261,11 @@
                     const runDuration = Math.min(gameState.timer, timeToLineAtFullSpeed);
                     const setupWindwardOffset = -fullUpwindVxPxPerSec * Math.min(6.5, runDuration);
                     const idealSetupX = Math.max(
-                        COURSE.startPin.x + 58,
+                        COURSE.startPin.x + 115,
                         Math.min(COURSE.startRC.x - 36, targetX + setupWindwardOffset)
                     );
                     // Ideal vertical staging depth scales smoothly with remaining countdown (48px–96px below the line)
-                    const idealSetupY = COURSE.startPin.y + Math.min(108, Math.max(46, fullUpwindVyPxPerSec * Math.min(5.2, Math.max(2.2, gameState.timer * 0.36))));
+                    const idealSetupY = COURSE.startPin.y + Math.min(108, Math.max(54, fullUpwindVyPxPerSec * Math.min(5.2, Math.max(2.2, gameState.timer * 0.36))));
 
                     // Emergency OCS / Too-High Guard: if bow is within 14px of the line with > 1.6s left, bear away / dip back immediately
                     if (distToLineY < 10 && gameState.timer > 1.6) {
@@ -2309,7 +2323,7 @@
                     this.roleBadge = 'FULL SPEED HIT LINE!';
                     this.luffing = false;
                     this.speedMatchCap = null;
-                    const crossX = Math.max(COURSE.startPin.x + 48, Math.min(COURSE.startRC.x - 42, this.x + fullUpwindVxPxPerSec * Math.max(1.2, gameState.timer)));
+                    const crossX = Math.max(COURSE.startPin.x + 68, Math.min(COURSE.startRC.x - 42, this.x + fullUpwindVxPxPerSec * Math.max(1.2, gameState.timer)));
                     const runTarget = { x: crossX + prestartRepelX * 0.35, y: COURSE.startPin.y - 48 };
                     const rawRun = radToDeg(Math.atan2(runTarget.x - this.x, -(runTarget.y - this.y)));
                     const relToWind = wrapAngle180(rawRun - effWindDir);
@@ -2425,9 +2439,11 @@
                     );
 
                     // 1. HARD POSITION-PROTECTION FLOOR:
-                    const minSafeLeadPx = (isMarkTrap && activeMark && dMark < THREE_BL_RADIUS * 2.8)
-                        ? BOAT_LENGTH * 0.90
-                        : BOAT_LENGTH * 1.35;
+                    // Allow tighter 0.80 BL cushion during a mark trap when we are directly between the victim and the mark,
+                    // but immediately sheet in to 100% speed if the victim gets any closer so we NEVER lose our position!
+                    const minSafeLeadPx = (isMarkTrap && activeMark && dMark < THREE_BL_RADIUS * 3.6)
+                        ? BOAT_LENGTH * 0.80
+                        : BOAT_LENGTH * 1.25;
 
                     if (leadGapPx < minSafeLeadPx || secondaryThreat) {
                         this.roleBadge = `PROTECT POS VS ${targetBoat.id}`;
@@ -2446,34 +2462,33 @@
                                 y: wpSelf.y * 0.82 + (targetBoat.y - Math.cos(wRad) * BOAT_LENGTH * 1.5) * 0.18
                             };
                         }
-                    } else if (isMarkTrap && activeMark && dMark < THREE_BL_RADIUS * 5.0) {
+                    } else if (isMarkTrap && activeMark && dMark < THREE_BL_RADIUS * 5.2) {
                         // 2. TEXTBOOK TEAM-RACE MARK TRAP EXECUTION (Marks 1, 2, 3, and 4):
-                        // Step A (Zone Entry Setup): Position directly between the mark's rounding side and the victim
-                        // so the victim is forced onto our outside/bad-air hip entering the 2-BL zone.
-                        // Step B (Inside Zone / Apex Hold): Slow down at the mark rounding apex to compress the victim
-                        // while leaving the inside lane or exit lane open for our beneficiary teammate to pass!
+                        // Step A (Zone Entry Setup): Position directly between the mark's rounding apex and the victim
+                        // and progressively slow down to compress the victim while keeping >= 0.85 BL lead buffer.
+                        // Step B (Inside Zone / Apex Hold): Check speed & luff at the rounding apex to hold the victim
+                        // wide/stalled while our beneficiary teammate cuts inside, then accelerate out if victim gets within 0.90 BL!
                         let trapApexPt = { x: activeMark.x, y: activeMark.y };
                         if (this.leg === 1) {
-                            // Mark 1 (Starboard rounding): Victim approaches from South-West; trap pocket is West-Northwest of M1
-                            trapApexPt = { x: activeMark.x - 54, y: activeMark.y - 18 };
+                            trapApexPt = { x: activeMark.x - 56, y: activeMark.y - 16 };
                         } else if (this.leg === 2) {
-                            // Mark 2 (Starboard gybe rounding): Victim approaches from West; trap pocket is North-East of M2
-                            trapApexPt = { x: activeMark.x + 28, y: activeMark.y - 54 };
+                            trapApexPt = { x: activeMark.x + 26, y: activeMark.y - 56 };
                         } else if (this.leg === 3) {
-                            // Mark 3 (Port rounding): Victim approaches from North; trap pocket is West-Southwest of M3
-                            trapApexPt = { x: activeMark.x - 56, y: activeMark.y + 24 };
+                            trapApexPt = { x: activeMark.x - 58, y: activeMark.y + 22 };
                         } else if (this.leg === 4) {
-                            // Mark 4 (Port leeward rounding): Victim approaches from West; trap pocket is South-East of M4
-                            trapApexPt = { x: activeMark.x + 32, y: activeMark.y + 56 };
+                            trapApexPt = { x: activeMark.x + 30, y: activeMark.y + 58 };
                         }
 
                         const toVictimX = targetBoat.x - trapApexPt.x;
                         const toVictimY = targetBoat.y - trapApexPt.y;
                         const toVictimLen = Math.hypot(toVictimX, toVictimY) || 1;
 
+                        // Smooth lead-margin ratio (0.0 at 0.80 BL minimum safe floor -> 1.0 at 2.4 BL comfortable lead)
+                        const leadSafetyRatio = Math.max(0, Math.min(1, (leadGapPx - BOAT_LENGTH * 0.80) / (BOAT_LENGTH * 1.60)));
+
                         if (dMark > THREE_BL_RADIUS * 1.25) {
-                            // Approach phase: position on the line between the trap apex and the victim, staying 1.5 BL ahead of victim
-                            const screenDist = Math.min(dMark * 0.65, Math.max(24, toVictimLen - BOAT_LENGTH * 1.45));
+                            // Approach phase: place our hull squarely on the line between the trap apex and the victim
+                            const screenDist = Math.min(dMark * 0.62, Math.max(22, toVictimLen - BOAT_LENGTH * 1.25));
                             desiredWp = {
                                 x: trapApexPt.x + (toVictimX / toVictimLen) * screenDist,
                                 y: trapApexPt.y + (toVictimY / toVictimLen) * screenDist
@@ -2481,87 +2496,105 @@
 
                             const targetBrgToApex = radToDeg(Math.atan2(trapApexPt.x - targetBoat.x, -(trapApexPt.y - targetBoat.y)));
                             const targetBrgToSelf = radToDeg(Math.atan2(this.x - targetBoat.x, -(this.y - targetBoat.y)));
-                            const alignedInFront = Math.abs(angleDiff(targetBrgToApex, targetBrgToSelf)) < 32;
+                            const alignedInFront = Math.abs(angleDiff(targetBrgToApex, targetBrgToSelf)) < 38;
 
-                            if (alignedInFront && dVictim < BOAT_LENGTH * 3.8 && leadGapPx > BOAT_LENGTH * 1.35) {
-                                this.roleBadge = `MARK TRAP SETUP ${targetBoat.id}`;
-                                this.speedMatchCap = Math.max(2.95, targetBoat.speed * 0.84);
+                            if (alignedInFront && dVictim < BOAT_LENGTH * 4.5 && leadGapPx > BOAT_LENGTH * 0.95) {
+                                this.roleBadge = `MARK TRAP SLOW ${targetBoat.id}`;
+                                // Brake proportionally to our lead cushion (down to 0.65x target speed when well ahead, rising to 0.96x as they close to 0.95 BL)
+                                const brakeFactor = 0.96 - leadSafetyRatio * 0.31;
+                                this.speedMatchCap = Math.max(2.15, targetBoat.speed * brakeFactor);
+                                this.luffing = (leadSafetyRatio > 0.55 && dVictim > BOAT_LENGTH * 1.45);
                             } else {
                                 this.roleBadge = `INTERCEPT ${targetBoat.id} @ M${this.leg}`;
                                 this.speedMatchCap = null;
                             }
                         } else {
-                            // Inside the Zone: Execute the Mark Trap Hold!
-                            // Drive wide/outside the victim or slow at the rounding apex to block the victim while helper shoots inside
+                            // Inside the Zone: Execute the Mark Trap Hold at the apex!
                             desiredWp = trapApexPt;
                             this.roleBadge = `TRAPPING ${targetBoat.id} @ M${this.leg}!`;
-                            if (dVictim < BOAT_LENGTH * 3.2 && leadGapPx > BOAT_LENGTH * 1.05) {
-                                this.speedMatchCap = Math.max(2.55, targetBoat.speed * 0.78);
-                                if (dVictim < BOAT_LENGTH * 1.9 && leadGapPx > BOAT_LENGTH * 1.25) {
+                            if (dVictim < BOAT_LENGTH * 3.6 && leadGapPx > BOAT_LENGTH * 0.85) {
+                                // Smoothly modulate brake so we slow the victim hard when 1.3+ BL ahead, but accelerate out before they can pass
+                                const zoneBrakeFactor = 0.95 - leadSafetyRatio * 0.37;
+                                this.speedMatchCap = Math.max(1.95, targetBoat.speed * zoneBrakeFactor);
+                                if (leadSafetyRatio > 0.35 && dVictim > BOAT_LENGTH * 1.15) {
                                     this.luffing = true;
                                 }
                             } else {
-                                this.speedMatchCap = Math.max(3.3, targetBoat.speed * 0.90);
+                                this.speedMatchCap = null;
                             }
                         }
                     } else if (this.leg === 1 || this.leg === 5) {
-                        // 3. UPWIND PASS-BACK & DIRTY-AIR PIN EXECUTION (NEVER SAIL BACKWARD!):
-                        // Match the target's tack when within lateral range so our wind shadow / sail-bounce cone hits them
+                        // 3. UPWIND PASS-BACK & REALISTIC DIRTY-AIR COVER (NEVER SAIL BACKWARD!):
+                        // Match the target's tack when within lateral range so our angled leeward wind shadow hits them squarely
                         const activeMarkSafe = !activeMark || dMark > (MARK_RADIUS + BOAT_LENGTH * 2.1);
-                        if (this.tack !== targetBoat.tack && dVictim < BOAT_LENGTH * 3.8 && this.aiTackCooldown <= 0 && activeMarkSafe && this.canSafelyTack(effWindDir)) {
+                        if (this.tack !== targetBoat.tack && dVictim < BOAT_LENGTH * 4.2 && this.aiTackCooldown <= 0 && activeMarkSafe && this.canSafelyTack(effWindDir)) {
                             this.triggerTack();
                             this.aiTackCooldown = 3.2;
                             return;
                         }
 
-                        // Project a target point that is ALWAYS forward toward Mark 1 / Finish, shifted laterally into the target's windward/upwind lane
                         const sign = this.tack === 'STBD' ? -1 : 1;
                         const closeHauledHdg = wrapAngle180(effWindDir + sign * 42);
 
-                        // Lateral offset perpendicular to wind (positive = Starboard of target's wind line)
-                        const dxFromTarget = this.x - targetBoat.x;
-                        const dyFromTarget = this.y - targetBoat.y;
-                        const crossWindErr = dxFromTarget * Math.cos(wRad) + dyFromTarget * Math.sin(wRad);
-                        // Ideal pin position: slightly to windward of target's wind shadow line (14px windward) so target eats our leeward + bounce dirty air
-                        const windwardSign = this.tack === 'STBD' ? 1 : -1;
-                        const desiredCrossWind = windwardSign * 14;
-                        const latDelta = desiredCrossWind - crossWindErr;
+                        // Compute exact reverse vector of our leeward wind-shadow cone so we position our boat
+                        // where our shadow cone trails directly onto the target boat!
+                        const downwindDir = wrapAngle180(effWindDir + 180);
+                        const leeSign = this.tack === 'STBD' ? -1 : 1;
+                        const leeBeamDir = wrapAngle180(closeHauledHdg + leeSign * 115);
+                        const shadowConeDir = wrapAngle180(downwindDir + angleDiff(leeBeamDir, downwindDir) * 0.28);
+                        const upwindOfShadowRad = degToRad(wrapAngle180(shadowConeDir + 180));
 
-                        // Steer close-hauled (42° TWA) with a smooth lateral correction (+/- 7° max) so we NEVER turn downwind/backward!
-                        const hdgCorrection = Math.max(-7, Math.min(7, latDelta * 0.12));
+                        const idealCoverDist = Math.max(BOAT_LENGTH * 1.35, Math.min(BOAT_LENGTH * 2.8, dVictim));
+                        const idealPinX = targetBoat.x + Math.sin(upwindOfShadowRad) * idealCoverDist;
+                        const idealPinY = targetBoat.y - Math.cos(upwindOfShadowRad) * idealCoverDist;
+
+                        // Measure lateral error perpendicular to our close-hauled course so we slide into the exact shadow lane without turning backward
+                        const chRad = degToRad(closeHauledHdg);
+                        const perpRightX = Math.cos(chRad);
+                        const perpRightY = Math.sin(chRad);
+                        const lateralErrToPin = (idealPinX - this.x) * perpRightX + (idealPinY - this.y) * perpRightY;
+
+                        const hdgCorrection = Math.max(-7.5, Math.min(7.5, lateralErrToPin * 0.14));
                         directHeading = wrapAngle180(closeHauledHdg + hdgCorrection);
 
-                        // Check if target is actually eating our dirty air (shadowFactor > 0.18 or leeBowedBy === this.id)
-                        const targetInOurDirtyAir = (targetBoat.shadowFactor > 0.18 || targetBoat.leeBowedBy === this.id) && Math.abs(latDelta) < 34;
+                        // Check if target is eating our dirty air (shadowFactor > 0.16 or leeBowedBy === this.id)
+                        const targetInOurDirtyAir = (targetBoat.shadowFactor > 0.16 || targetBoat.leeBowedBy === this.id) || Math.abs(lateralErrToPin) < 24;
 
-                        if (targetInOurDirtyAir && leadGapPx > BOAT_LENGTH * 1.55) {
+                        if (targetInOurDirtyAir && leadGapPx > BOAT_LENGTH * 1.30) {
                             this.roleBadge = `PINNING ${targetBoat.id} (DIRTY AIR)`;
-                            this.speedMatchCap = Math.max(3.35, targetBoat.speed * 0.93);
+                            const leadCushion = Math.min(1, (leadGapPx - BOAT_LENGTH * 1.25) / (BOAT_LENGTH * 1.5));
+                            this.speedMatchCap = Math.max(3.15, targetBoat.speed * (0.96 - leadCushion * 0.08));
                         } else {
-                            this.roleBadge = `LOCKING LANE ON ${targetBoat.id}`;
+                            this.roleBadge = `COVERING ${targetBoat.id}`;
                             this.speedMatchCap = null;
                         }
                     } else {
-                        // 4. REACH / DOWNWIND HOOK & BLANKET (NEVER SAIL BACKWARD!):
+                        // 4. REACH / DOWNWIND HOOK & REALISTIC WIND BLANKET (NEVER SAIL BACKWARD!):
                         const toWpX = wpSelf.x - this.x;
                         const toWpY = wpSelf.y - this.y;
                         const toWpLen = Math.hypot(toWpX, toWpY) || 1;
-                        const lookAhead = Math.min(toWpLen, BOAT_LENGTH * 3.5);
+                        const lookAhead = Math.min(toWpLen, BOAT_LENGTH * 3.4);
 
-                        const idealBlanketX = targetBoat.x + Math.sin(wRad) * (BOAT_LENGTH * 1.45);
-                        const idealBlanketY = targetBoat.y - Math.cos(wRad) * (BOAT_LENGTH * 1.45);
+                        const downwindDir = wrapAngle180(effWindDir + 180);
+                        const leeSign = this.tack === 'STBD' ? -1 : 1;
+                        const leeBeamDir = wrapAngle180(this.heading + leeSign * 115);
+                        const shadowConeDir = wrapAngle180(downwindDir + angleDiff(leeBeamDir, downwindDir) * 0.28);
+                        const upwindOfShadowRad = degToRad(wrapAngle180(shadowConeDir + 180));
+
+                        const idealBlanketX = targetBoat.x + Math.sin(upwindOfShadowRad) * (BOAT_LENGTH * 1.55);
+                        const idealBlanketY = targetBoat.y - Math.cos(upwindOfShadowRad) * (BOAT_LENGTH * 1.55);
                         const forwardX = this.x + (toWpX / toWpLen) * lookAhead;
                         const forwardY = this.y + (toWpY / toWpLen) * lookAhead;
 
                         desiredWp = {
-                            x: forwardX * 0.65 + idealBlanketX * 0.35,
-                            y: forwardY * 0.65 + idealBlanketY * 0.35
+                            x: forwardX * 0.62 + idealBlanketX * 0.38,
+                            y: forwardY * 0.62 + idealBlanketY * 0.38
                         };
 
-                        const targetBlanketed = targetBoat.shadowFactor > 0.18;
-                        if (targetBlanketed && leadGapPx > BOAT_LENGTH * 1.55) {
+                        const targetBlanketed = targetBoat.shadowFactor > 0.16;
+                        if (targetBlanketed && leadGapPx > BOAT_LENGTH * 1.30) {
                             this.roleBadge = `BLANKET ${targetBoat.id}`;
-                            this.speedMatchCap = Math.max(3.45, targetBoat.speed * 0.93);
+                            this.speedMatchCap = Math.max(3.25, targetBoat.speed * 0.91);
                         } else {
                             this.roleBadge = `COVER LANE ${targetBoat.id}`;
                             this.speedMatchCap = null;
@@ -2601,18 +2634,46 @@
                         this.aiTackCooldown = 3.0;
                     }
                 } else if (jobInfo.job === 'COVER' && targetBoat) {
-                    // Loose or tight cover between target opponent and the active mark/finish
+                    // Realistic Tactical Cover:
+                    // Position directly between the opponent and the next mark / wind so our angled leeward shadow cone
+                    // blankets them if they get close, while maintaining full VMG so we never lose our lead!
+                    const activeMarkSafe = !activeMark || dMark > (MARK_RADIUS + BOAT_LENGTH * 2.1);
                     if (this.leg === 1 || this.leg === 5) {
-                        const wRad = degToRad(effWindDir);
-                        const coverDist = jobInfo.mode === 'TIGHT_COVER' ? 42 : 76;
-                        desiredWp = {
-                            x: targetBoat.x + Math.sin(wRad) * coverDist,
-                            y: targetBoat.y - Math.cos(wRad) * coverDist
-                        };
-                        if (targetBoat.tack !== this.tack && distBetween(this, targetBoat) < 220 && this.aiTackCooldown <= 0 && this.canSafelyTack(effWindDir)) {
+                        if (targetBoat.tack !== this.tack && distBetween(this, targetBoat) < 240 && this.aiTackCooldown <= 0 && activeMarkSafe && this.canSafelyTack(effWindDir)) {
                             this.triggerTack();
-                            this.aiTackCooldown = 3.5;
+                            this.aiTackCooldown = 3.2;
+                            return;
                         }
+                        const sign = this.tack === 'STBD' ? -1 : 1;
+                        const closeHauledHdg = wrapAngle180(effWindDir + sign * 42);
+                        const downwindDir = wrapAngle180(effWindDir + 180);
+                        const leeSign = this.tack === 'STBD' ? -1 : 1;
+                        const leeBeamDir = wrapAngle180(closeHauledHdg + leeSign * 115);
+                        const shadowConeDir = wrapAngle180(downwindDir + angleDiff(leeBeamDir, downwindDir) * 0.28);
+                        const upwindOfShadowRad = degToRad(wrapAngle180(shadowConeDir + 180));
+
+                        const coverDist = jobInfo.mode === 'TIGHT_COVER' ? BOAT_LENGTH * 1.65 : BOAT_LENGTH * 2.4;
+                        const coverPtX = targetBoat.x + Math.sin(upwindOfShadowRad) * coverDist;
+                        const coverPtY = targetBoat.y - Math.cos(upwindOfShadowRad) * coverDist;
+
+                        // Blend 65% mark layline + 35% wind-shadow cover line so the covering boat always progresses upwind
+                        const chRad = degToRad(closeHauledHdg);
+                        const perpRightX = Math.cos(chRad);
+                        const perpRightY = Math.sin(chRad);
+                        const latErr = (coverPtX - this.x) * perpRightX + (coverPtY - this.y) * perpRightY;
+                        const maxCoverSteer = jobInfo.mode === 'TIGHT_COVER' ? 6.5 : 4.5;
+                        const coverAdjust = Math.max(-maxCoverSteer, Math.min(maxCoverSteer, latErr * 0.10));
+                        directHeading = wrapAngle180(closeHauledHdg + coverAdjust);
+                    } else {
+                        // Reach/Run Cover: stay squarely on the line between the opponent and the next mark
+                        const dTargetToMark = distBetween(targetBoat, desiredWp);
+                        const leadStep = Math.min(dTargetToMark * 0.45, BOAT_LENGTH * 2.6);
+                        const toMarkX = (desiredWp.x - targetBoat.x) / Math.max(1, dTargetToMark);
+                        const toMarkY = (desiredWp.y - targetBoat.y) / Math.max(1, dTargetToMark);
+                        desiredWp = {
+                            x: desiredWp.x * 0.55 + (targetBoat.x + toMarkX * leadStep) * 0.45,
+                            y: desiredWp.y * 0.55 + (targetBoat.y + toMarkY * leadStep) * 0.45
+                        };
                     }
                 }
 
@@ -2938,11 +2999,21 @@
                         this.shadowFactor = 0;
                         this.shadowHeader = 0;
                         gameState.finishOrder.push(this);
-                        logRadio(this.id, this.team, `FINISHED in ${this.finishTime.toFixed(1)}s!`);
+                        const finishPlace = gameState.finishOrder.length;
+                        const placeSuffix = finishPlace === 1 ? 'st' : (finishPlace === 2 ? 'nd' : (finishPlace === 3 ? 'rd' : 'th'));
+                        logRadio(this.id, this.team, `FINISHED ${finishPlace}${placeSuffix} in ${this.finishTime.toFixed(1)}s!`);
 
                         if (gameState.finishWindowTimer === null) {
                             gameState.finishWindowTimer = 90.0;
-                            showToast(`🏁 ${this.id} Finished! 90s Finishing Window started.`);
+                            if (this.isPlayer) {
+                                showToast(`🏁 You Finished ${finishPlace}${placeSuffix} (${this.finishTime.toFixed(1)}s)! 90s Finishing Window started.`);
+                            } else {
+                                showToast(`🏁 ${this.id} Finished 1st! 90s Finishing Window started.`);
+                            }
+                        } else if (this.isPlayer) {
+                            showToast(`🏁 You Finished ${finishPlace}${placeSuffix} in ${this.finishTime.toFixed(1)}s!`);
+                        } else {
+                            showToast(`🏁 ${this.id} Finished ${finishPlace}${placeSuffix} (${this.finishTime.toFixed(1)}s)`);
                         }
                     }
                 }
@@ -3042,44 +3113,52 @@
                 // On PORT tack, sail swings out to Starboard (+1), so the side WITHOUT the sail is Port (-1).
                 const leeSign = caster.tack === 'STBD' ? -1 : 1;
                 const noSailSideSign = caster.tack === 'STBD' ? 1 : -1;
-                const bounceDir = wrapAngle180(downwindDir + leeSign * 36);
-                // Smaller windward-aft shadow on the side WITHOUT the sail, curving aft from the windward quarter
-                const windwardAftDir = wrapAngle180(caster.heading + 180 - noSailSideSign * 38);
+
+                // Blend mostly downwind/astern while keeping a slight perpendicular angle off the quarter:
+                // Leeward shadow angles ~22° toward the leeward beam from downwind
+                const leeBeamDir = wrapAngle180(caster.heading + leeSign * 115);
+                const leeShadowDir = wrapAngle180(downwindDir + angleDiff(leeBeamDir, downwindDir) * 0.28);
+                // Sail-bounce cone extends aft-leeward (~142° off bow, more behind with a modest perpendicular flare)
+                const bounceDir = wrapAngle180(downwindDir + leeSign * 28 + angleDiff(wrapAngle180(caster.heading + leeSign * 138), downwindDir) * 0.32);
+                // Smaller windward-aft shadow extends mostly behind on the no-sail quarter (~146° off bow)
+                const windwardAftDir = wrapAngle180(caster.heading + noSailSideSign * 146);
 
                 for (const target of gameState.boats) {
                     if (target === caster || !target.activeInRace || target.finished) continue;
                     const d = distBetween(caster, target);
-                    if (d > BOAT_LENGTH * 3.8 || d < 8) continue;
+                    if (d > BOAT_LENGTH * 4.3 || d < 8) continue;
 
                     const brg = radToDeg(Math.atan2(target.x - caster.x, -(target.y - caster.y)));
-                    const diffLee = Math.abs(angleDiff(brg, downwindDir));
+                    const diffLee = Math.abs(angleDiff(brg, leeShadowDir));
                     if (diffLee < 22) {
-                        const distRatio = 1 - d / (BOAT_LENGTH * 3.8);
+                        const distRatio = 1 - d / (BOAT_LENGTH * 4.3);
                         const angleRatio = 1 - diffLee / 22;
-                        const blanket = distRatio * angleRatio * 0.85;
+                        const blanket = Math.min(1.0, Math.pow(distRatio, 0.78) * Math.pow(angleRatio, 0.75) * 1.12);
                         if (blanket > target.shadowFactor) {
                             target.shadowFactor = blanket;
-                            target.shadowHeader = leeSign * 4.5 * blanket;
+                            target.shadowHeader = leeSign * 8.5 * blanket;
                         }
                     }
 
                     const diffBounce = Math.abs(angleDiff(brg, bounceDir));
-                    if (diffBounce < 26 && d < BOAT_LENGTH * 2.6) {
-                        const backwind = (1 - d / (BOAT_LENGTH * 2.6)) * (1 - diffBounce / 26) * 0.68;
+                    if (diffBounce < 24 && d < BOAT_LENGTH * 2.9) {
+                        const distRatioB = 1 - d / (BOAT_LENGTH * 2.9);
+                        const angleRatioB = 1 - diffBounce / 24;
+                        const backwind = Math.min(0.95, Math.pow(distRatioB, 0.8) * Math.pow(angleRatioB, 0.8) * 0.92);
                         if (backwind > target.shadowFactor) {
                             target.shadowFactor = backwind;
-                            target.shadowHeader = -leeSign * 5.0 * backwind;
+                            target.shadowHeader = -leeSign * 9.0 * backwind;
                             target.leeBowedBy = caster.id;
                         }
                     }
 
-                    // Smaller windward-aft wind shadow on the side without the sail (1.35 BL, ±15°)
+                    // Smaller windward-aft wind shadow on the side without the sail (1.65 BL, ±16°)
                     const diffWindwardAft = Math.abs(angleDiff(brg, windwardAftDir));
-                    if (diffWindwardAft < 15 && d < BOAT_LENGTH * 1.35) {
-                        const wShadow = (1 - d / (BOAT_LENGTH * 1.35)) * (1 - diffWindwardAft / 15) * 0.48;
+                    if (diffWindwardAft < 16 && d < BOAT_LENGTH * 1.65) {
+                        const wShadow = Math.min(0.82, (1 - d / (BOAT_LENGTH * 1.65)) * (1 - diffWindwardAft / 16) * 0.74);
                         if (wShadow > target.shadowFactor) {
                             target.shadowFactor = wShadow;
-                            target.shadowHeader = noSailSideSign * 3.8 * wShadow;
+                            target.shadowHeader = noSailSideSign * 6.5 * wShadow;
                             target.leeBowedBy = caster.id;
                         }
                     }
@@ -3088,7 +3167,7 @@
         }
 
         function adjudicateBoatToBoatIncident(a, b, windDir, isPhysicalContact = false) {
-            // 1. Section D overrides Section A & B (RRS Rule 21.1 Returning to Start & 21.2 Taking a Penalty)
+            // 0. Section D overrides Section A, B & C (RRS Rule 21.1 Returning to Start & 21.2 Taking a Penalty)
             if (a.ocs !== b.ocs) {
                 const ocsBoat = a.ocs ? a : b;
                 const clearBoat = a.ocs ? b : a;
@@ -3100,21 +3179,26 @@
                 return { penalized: spinBoat, exonerated: otherBoat, rule: 'RRS 21.2 (Taking Penalty)' };
             }
 
-            // Compute each boat's true tack from the local wind direction (STBD = wind on Starboard side, PORT = wind on Port side)
-            const tackA = getBoatTrueTack(a, windDir);
-            const tackB = getBoatTrueTack(b, windDir);
-            const rel = getHullRelation(a, b);
+            // Use pre-contact tack & hull state when adjudicating physical contact so collision bounce never alters the call
+            const tackA = getBoatTrueTack(a, windDir, isPhysicalContact);
+            const tackB = getBoatTrueTack(b, windDir, isPhysicalContact);
+            const rel = getHullRelation(a, b, isPhysicalContact);
 
-            // 2. Rule 13: While Tacking (After passing head to wind until on a close-hauled course)
-            if (a.isTacking !== b.isTacking) {
-                const tackingBoat = a.isTacking ? a : b;
-                const otherBoat = a.isTacking ? b : a;
-                return { penalized: tackingBoat, exonerated: otherBoat, rule: 'RRS 13 (While Tacking)' };
-            }
-
-            // 3. Section C: Mark-Room (RRS Rule 18 & Rule 43.1(b) Exoneration)
+            // =========================================================================
+            // PRIORITY 1: RRS RULE 18 (MARK-ROOM — Section C overrides Section A)
+            // =========================================================================
             const mark = a.getActiveRoundingMark();
             if (doesRule18ApplyBetween(a, b, mark, windDir)) {
+                // Rule 18.3: Tacking in the Zone on an upwind mark (Mark 1)
+                if ((a.leg === 1 || a.leg === 5) && mark && mark.rounding === 'STBD') {
+                    if (a.tackedInZone && !b.tackedInZone && tackB === 'STBD') {
+                        return { penalized: a, exonerated: b, rule: 'RRS 18.3 (Tacking in the Zone)' };
+                    }
+                    if (b.tackedInZone && !a.tackedInZone && tackA === 'STBD') {
+                        return { penalized: b, exonerated: a, rule: 'RRS 18.3 (Tacking in the Zone)' };
+                    }
+                }
+
                 const r18 = getRule18PairStatus(a, b);
                 let insideBoat = null;
                 let outsideBoat = null;
@@ -3128,61 +3212,71 @@
                     outsideBoat = aInside ? b : a;
                 }
 
-                // Rule 18.3: Tacking in the Zone on an upwind mark (Mark 1)
-                if ((a.leg === 1 || a.leg === 5) && mark && mark.rounding === 'STBD') {
-                    if (a.tackedInZone && !b.tackedInZone && tackB === 'STBD') {
-                        return { penalized: a, exonerated: b, rule: 'RRS 18.3 (Tacking in the Zone)' };
-                    }
-                    if (b.tackedInZone && !a.tackedInZone && tackA === 'STBD') {
-                        return { penalized: b, exonerated: a, rule: 'RRS 18.3 (Tacking in the Zone)' };
-                    }
-                }
-
-                // Rule 18.2(a): Outside/clear-astern boat must give Mark-Room (including room to round the mark as necessary to sail the course)
+                // Rule 18.2(a) & Rule 43.1(b): Outside/clear-astern boat must give Mark-Room;
+                // inside boat is exonerated under Rule 43.1(b) if she breaks a Section A rule while taking mark-room to which she is entitled
                 if (insideBoat && outsideBoat && !insideBoat.tackedInZone) {
                     const dInsideMark = distBetween(insideBoat, mark);
                     const dOutsideMark = distBetween(outsideBoat, mark);
-                    // Verify insideBoat hasn't sailed wide out of mark-room corridor
-                    if (dInsideMark <= dOutsideMark + BOAT_LENGTH * 0.45) {
+                    if (dInsideMark <= dOutsideMark + BOAT_LENGTH * 0.55) {
                         return { penalized: outsideBoat, exonerated: insideBoat, rule: 'RRS 18.2(a) (Give Mark-Room)' };
                     }
                 }
             }
 
-            // 4. Rule 10: On Opposite Tacks (A port-tack boat shall keep clear of a starboard-tack boat)
-            if (tackA !== tackB) {
-                const portBoat = tackA === 'PORT' ? a : b;
-                const stbdBoat = tackA === 'STBD' ? a : b;
-                // Rule 15: If Starboard just acquired right of way by tacking/gybing within 0.45s, she must initially give Port room to keep clear
-                if (stbdBoat.justAcquiredRowTimer > 0.45) {
-                    return { penalized: stbdBoat, exonerated: portBoat, rule: 'RRS 15 (Acquiring Right of Way)' };
-                }
-                return { penalized: portBoat, exonerated: stbdBoat, rule: 'RRS 10 (Port / Starboard)' };
+            // Rule 13: While Tacking (After passing head to wind until on a close-hauled course)
+            if (a.isTacking !== b.isTacking) {
+                const tackingBoat = a.isTacking ? a : b;
+                const otherBoat = a.isTacking ? b : a;
+                return { penalized: tackingBoat, exonerated: otherBoat, rule: 'RRS 13 (While Tacking)' };
             }
 
-            // 5. Same Tack (Both on STBD or both on PORT): Rule 11 (Overlapped) vs Rule 12 (Clear Astern / Clear Ahead)
-            // If physical contact occurred ONLY at the stern/transom of the ahead boat on the same tack, adjudicate under Rule 12!
+            // =========================================================================
+            // PRIORITY 2: RRS RULE 10 (ON OPPOSITE TACKS — PORT MUST KEEP CLEAR OF STARBOARD)
+            // A Starboard-tack boat can NEVER be called for Rule 11 or Rule 12 against a Port-tack boat!
+            // =========================================================================
+            if (tackA !== tackB || a.prevTack !== b.prevTack) {
+                const effTackA = (tackA !== tackB) ? tackA : a.prevTack;
+                const effTackB = (tackA !== tackB) ? tackB : b.prevTack;
+                if (effTackA !== effTackB) {
+                    const portBoat = effTackA === 'PORT' ? a : b;
+                    const stbdBoat = effTackA === 'STBD' ? a : b;
+                    // Rule 15: Only if Starboard just completed a tack/gybe within 0.35s right on top of Port
+                    if (stbdBoat.justAcquiredRowTimer > 0.75) {
+                        return { penalized: stbdBoat, exonerated: portBoat, rule: 'RRS 15 (Acquiring Right of Way)' };
+                    }
+                    return { penalized: portBoat, exonerated: stbdBoat, rule: 'RRS 10 (Port / Starboard)' };
+                }
+            }
+
+            // =========================================================================
+            // PRIORITY 3: RRS RULE 11 (ON THE SAME TACK, OVERLAPPED — WINDWARD KEEPS CLEAR OF LEEWARD)
+            // Checked BEFORE Rule 12 unless one boat was strictly Clear Astern and hit the other's stern!
+            // =========================================================================
+            const strictlySternCollision = isPhysicalContact
+                ? ((rel.aHitBStern && !rel.bHitAStern) || (rel.bHitAStern && !rel.aHitBStern))
+                : (!rel.overlapped && (rel.aClearAsternOfB || rel.bClearAsternOfA));
+
+            if (!strictlySternCollision) {
+                const wl = getWindwardLeewardRelation(a, b, windDir, isPhysicalContact);
+                if (wl.leeward.justAcquiredRowTimer > 0.75) {
+                    return { penalized: wl.leeward, exonerated: wl.windward, rule: 'RRS 15 (Room to Keep Clear)' };
+                }
+                return { penalized: wl.windward, exonerated: wl.leeward, rule: 'RRS 11 (Windward / Leeward)' };
+            }
+
+            // =========================================================================
+            // PRIORITY 4: RRS RULE 12 (ON THE SAME TACK, NOT OVERLAPPED — CLEAR ASTERN KEEPS CLEAR)
+            // Only applies when both boats are on the SAME tack and the clear-astern boat hits the stern of the boat clear ahead!
+            // =========================================================================
             if (isPhysicalContact) {
-                if (rel.aHitBStern && !rel.bHitAStern) {
-                    return { penalized: a, exonerated: b, rule: 'RRS 12 (Clear Astern Hit Stern)' };
-                }
-                if (rel.bHitAStern && !rel.aHitBStern) {
-                    return { penalized: b, exonerated: a, rule: 'RRS 12 (Clear Astern Hit Stern)' };
-                }
-            } else if (!rel.overlapped) {
-                // Predictive AI keep-clear check before contact: clear astern keeps clear of clear ahead
+                const asternBoat = rel.aHitBStern ? a : b;
+                const aheadBoat = asternBoat === a ? b : a;
+                return { penalized: asternBoat, exonerated: aheadBoat, rule: 'RRS 12 (Clear Astern Hit Stern)' };
+            } else {
                 const asternBoat = rel.aClearAsternOfB ? a : b;
                 const aheadBoat = asternBoat === a ? b : a;
                 return { penalized: asternBoat, exonerated: aheadBoat, rule: 'RRS 12 (Clear Astern)' };
             }
-
-            // 6. Rule 11: On the Same Tack, Overlapped (A windward boat shall keep clear of a leeward boat)
-            // Also handles any same-tack side-to-side contact where neither boat's stern was hit from astern
-            const wl = getWindwardLeewardRelation(a, b, windDir);
-            if (wl.leeward.justAcquiredRowTimer > 0.45) {
-                return { penalized: wl.leeward, exonerated: wl.windward, rule: 'RRS 15 (Room to Keep Clear)' };
-            }
-            return { penalized: wl.windward, exonerated: wl.leeward, rule: 'RRS 11 (Windward / Leeward)' };
         }
 
         function checkOBBHullCollision(a, b) {
@@ -3294,28 +3388,31 @@
 
                     const col = checkOBBHullCollision(a, b);
                     if (col) {
-                        resolveRealisticHullCollision(a, b, col);
-
-                        // Never issue a penalty when a bot touches its own teammate (teammate incidents do not protest each other)
+                        // Adjudicate the RRS incident BEFORE applying physical collision bounce/rotation
+                        // so pre-contact tack (STBD vs PORT) and hull overlap/stern geometry are 100% preserved!
                         const sameTeamBotIncident = (a.team === b.team) && (!a.isPlayer || !b.isPlayer);
+                        let verdict = null;
                         if (!sameTeamBotIncident && a.foulCooldown <= 0 && b.foulCooldown <= 0) {
                             const localW = getWindAt((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-                            const verdict = adjudicateBoatToBoatIncident(a, b, localW.dir, true);
-                            if (verdict && verdict.penalized) {
-                                const penBoat = verdict.penalized;
-                                const exoBoat = verdict.exonerated;
-                                penBoat.penalties += 1;
-                                penBoat.foulCooldown = 3.5;
-                                exoBoat.foulCooldown = 2.0;
-                                exoBoat.lastCompelledBy = penBoat.id;
-                                exoBoat.lastCompelledTimer = 2.0;
+                            verdict = adjudicateBoatToBoatIncident(a, b, localW.dir, true);
+                        }
 
-                                logRadio(penBoat.id, penBoat.team, `Foul vs ${exoBoat.id} (${verdict.rule})`);
-                                if (penBoat.isPlayer) {
-                                    showToast(`🚩 Foul (${verdict.rule})! Press [P] to Spin.`);
-                                } else if (exoBoat.isPlayer) {
-                                    showToast(`🛡️ Right of Way vs ${penBoat.id} (${verdict.rule})`);
-                                }
+                        resolveRealisticHullCollision(a, b, col);
+
+                        if (verdict && verdict.penalized) {
+                            const penBoat = verdict.penalized;
+                            const exoBoat = verdict.exonerated;
+                            penBoat.penalties += 1;
+                            penBoat.foulCooldown = 3.5;
+                            exoBoat.foulCooldown = 2.0;
+                            exoBoat.lastCompelledBy = penBoat.id;
+                            exoBoat.lastCompelledTimer = 2.0;
+
+                            logRadio(penBoat.id, penBoat.team, `Foul vs ${exoBoat.id} (${verdict.rule})`);
+                            if (penBoat.isPlayer) {
+                                showToast(`🚩 Foul (${verdict.rule})! Press [P] to Spin.`);
+                            } else if (exoBoat.isPlayer) {
+                                showToast(`🛡️ Right of Way vs ${penBoat.id} (${verdict.rule})`);
                             }
                         }
                     }
@@ -3551,17 +3648,19 @@
                 const downwindDir = wrapAngle180(localW.dir + 180);
                 const leeSign = caster.tack === 'STBD' ? -1 : 1;
                 const noSailSideSign = caster.tack === 'STBD' ? 1 : -1;
-                const bounceDir = wrapAngle180(downwindDir + leeSign * 36);
-                const windwardAftDir = wrapAngle180(caster.heading + 180 - noSailSideSign * 38);
+                const leeBeamDir = wrapAngle180(caster.heading + leeSign * 115);
+                const leeShadowDir = wrapAngle180(downwindDir + angleDiff(leeBeamDir, downwindDir) * 0.28);
+                const bounceDir = wrapAngle180(downwindDir + leeSign * 28 + angleDiff(wrapAngle180(caster.heading + leeSign * 138), downwindDir) * 0.32);
+                const windwardAftDir = wrapAngle180(caster.heading + noSailSideSign * 146);
 
-                // 1. Primary Leeward Wind Shadow Cone (matches computeDirtyAirAndZones: 3.8 BL, ±22°)
-                const leeLen = BOAT_LENGTH * 3.8;
-                const leeStartRad = degToRad(downwindDir - 22) - Math.PI * 0.5;
-                const leeEndRad = degToRad(downwindDir + 22) - Math.PI * 0.5;
+                // 1. Primary Leeward Wind Shadow Cone (matches computeDirtyAirAndZones: 4.3 BL, ±22°, trailing downwind with a slight leeward angle)
+                const leeLen = BOAT_LENGTH * 4.3;
+                const leeStartRad = degToRad(leeShadowDir - 22) - Math.PI * 0.5;
+                const leeEndRad = degToRad(leeShadowDir + 22) - Math.PI * 0.5;
 
                 const leeGrad = ctx.createRadialGradient(caster.x, caster.y, 8, caster.x, caster.y, leeLen);
-                leeGrad.addColorStop(0, 'rgba(148, 163, 184, 0.30)');
-                leeGrad.addColorStop(0.65, 'rgba(148, 163, 184, 0.14)');
+                leeGrad.addColorStop(0, 'rgba(148, 163, 184, 0.36)');
+                leeGrad.addColorStop(0.65, 'rgba(148, 163, 184, 0.17)');
                 leeGrad.addColorStop(1, 'rgba(148, 163, 184, 0)');
 
                 ctx.save();
@@ -3573,19 +3672,19 @@
                 ctx.fill();
 
                 ctx.setLineDash([4, 4]);
-                ctx.strokeStyle = 'rgba(203, 213, 225, 0.25)';
+                ctx.strokeStyle = 'rgba(203, 213, 225, 0.28)';
                 ctx.lineWidth = 1;
                 ctx.stroke();
                 ctx.restore();
 
-                // 2. Sail-Bounce Backwind Deflection Cone (matches computeDirtyAirAndZones: 2.6 BL, ±26°)
-                const bounceLen = BOAT_LENGTH * 2.6;
-                const bounceStartRad = degToRad(bounceDir - 26) - Math.PI * 0.5;
-                const bounceEndRad = degToRad(bounceDir + 26) - Math.PI * 0.5;
+                // 2. Sail-Bounce Backwind Deflection Cone (matches computeDirtyAirAndZones: 2.9 BL, ±24°, angled aft-leeward)
+                const bounceLen = BOAT_LENGTH * 2.9;
+                const bounceStartRad = degToRad(bounceDir - 24) - Math.PI * 0.5;
+                const bounceEndRad = degToRad(bounceDir + 24) - Math.PI * 0.5;
 
                 const bounceGrad = ctx.createRadialGradient(caster.x, caster.y, 8, caster.x, caster.y, bounceLen);
-                bounceGrad.addColorStop(0, 'rgba(251, 191, 36, 0.22)');
-                bounceGrad.addColorStop(0.7, 'rgba(251, 191, 36, 0.09)');
+                bounceGrad.addColorStop(0, 'rgba(251, 191, 36, 0.26)');
+                bounceGrad.addColorStop(0.7, 'rgba(251, 191, 36, 0.11)');
                 bounceGrad.addColorStop(1, 'rgba(251, 191, 36, 0)');
 
                 ctx.save();
@@ -3597,17 +3696,17 @@
                 ctx.fill();
                 ctx.restore();
 
-                // 3. Smaller Windward-Aft Deflection Shadow on the side WITHOUT the sail (1.35 BL, ±15°)
+                // 3. Smaller Windward-Aft Deflection Shadow on the side WITHOUT the sail (1.65 BL, ±16°, angled aft off windward quarter)
                 const aftOffsetRad = degToRad(caster.heading + 180);
-                const originX = caster.x + Math.sin(aftOffsetRad) * (BOAT_LENGTH * 0.24);
-                const originY = caster.y - Math.cos(aftOffsetRad) * (BOAT_LENGTH * 0.24);
-                const wAftLen = BOAT_LENGTH * 1.35;
-                const wAftStartRad = degToRad(windwardAftDir - 15) - Math.PI * 0.5;
-                const wAftEndRad = degToRad(windwardAftDir + 15) - Math.PI * 0.5;
+                const originX = caster.x + Math.sin(aftOffsetRad) * (BOAT_LENGTH * 0.26);
+                const originY = caster.y - Math.cos(aftOffsetRad) * (BOAT_LENGTH * 0.26);
+                const wAftLen = BOAT_LENGTH * 1.65;
+                const wAftStartRad = degToRad(windwardAftDir - 16) - Math.PI * 0.5;
+                const wAftEndRad = degToRad(windwardAftDir + 16) - Math.PI * 0.5;
 
                 const wAftGrad = ctx.createRadialGradient(originX, originY, 3, originX, originY, wAftLen);
-                wAftGrad.addColorStop(0, 'rgba(125, 211, 252, 0.24)');
-                wAftGrad.addColorStop(0.65, 'rgba(125, 211, 252, 0.10)');
+                wAftGrad.addColorStop(0, 'rgba(125, 211, 252, 0.28)');
+                wAftGrad.addColorStop(0.65, 'rgba(125, 211, 252, 0.12)');
                 wAftGrad.addColorStop(1, 'rgba(125, 211, 252, 0)');
 
                 ctx.save();
@@ -3619,7 +3718,7 @@
                 ctx.fill();
 
                 ctx.setLineDash([3, 4]);
-                ctx.strokeStyle = 'rgba(125, 211, 252, 0.24)';
+                ctx.strokeStyle = 'rgba(125, 211, 252, 0.28)';
                 ctx.lineWidth = 1;
                 ctx.stroke();
                 ctx.restore();
@@ -3911,12 +4010,12 @@
             gameState.collisionSparks = [];
 
             const slots = [
-                { id: 'B1', team: 'BLUE', x: 580, y: 2210 },
-                { id: 'R1', team: 'RED',  x: 656, y: 2236 },
-                { id: 'B2', team: 'BLUE', x: 732, y: 2210 },
-                { id: 'R2', team: 'RED',  x: 808, y: 2236 },
-                { id: 'B3', team: 'BLUE', x: 884, y: 2210 },
-                { id: 'R3', team: 'RED',  x: 960, y: 2236 }
+                { id: 'B1', team: 'BLUE', x: 635, y: 2224 },
+                { id: 'R1', team: 'RED',  x: 702, y: 2248 },
+                { id: 'B2', team: 'BLUE', x: 769, y: 2224 },
+                { id: 'R2', team: 'RED',  x: 836, y: 2248 },
+                { id: 'B3', team: 'BLUE', x: 903, y: 2224 },
+                { id: 'R3', team: 'RED',  x: 970, y: 2248 }
             ];
 
             gameState.boats = slots.map(s => {
