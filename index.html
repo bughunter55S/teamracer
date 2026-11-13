@@ -3989,9 +3989,611 @@
         }
 
         // ============================================================================
+        // REAL-TIME MULTIPLAYER PARTY & 3v3 RELAY ENGINE (MQTT + BROADCASTCHANNEL)
+        // ============================================================================
+        const MP_TOPIC_PREFIX = 'c420_teamrace_v3_';
+        let mqttClient = null;
+        let localBus = null;
+        const publicPartiesRegistry = {};
+
+        function initMultiplayerRelay() {
+            const nameInput = document.getElementById('playerNameInput');
+            if (nameInput) {
+                mpState.playerName = (nameInput.value || 'Skipper').trim();
+                nameInput.addEventListener('input', () => {
+                    mpState.playerName = (nameInput.value || 'Skipper').trim() || 'Skipper';
+                    if (mpState.partyCode && mpState.partyData) {
+                        for (const slotId of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                            if (mpState.partyData.slots[slotId]?.userId === mpState.userId) {
+                                mpState.partyData.slots[slotId].name = mpState.playerName;
+                            }
+                        }
+                        if (mpState.isHost) broadcastPartyRoomState();
+                        else sendPartyAction({ type: 'CLAIM_SLOT', slotId: config.playerBoatId, userId: mpState.userId, name: mpState.playerName });
+                        renderPartySlotsGrid();
+                    }
+                });
+            }
+
+            // 1. Instant Local Tab-to-Tab Relay via BroadcastChannel
+            if (typeof BroadcastChannel !== 'undefined') {
+                localBus = new BroadcastChannel('c420_mp_bus_v3');
+                localBus.onmessage = (ev) => {
+                    if (ev.data && ev.data.topic && ev.data.payload) {
+                        handleIncomingRelayPacket(ev.data.topic, ev.data.payload);
+                    }
+                };
+            }
+
+            // 2. Global Cross-Device WebSockets Relay via public EMQX broker
+            if (typeof mqtt !== 'undefined') {
+                try {
+                    mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+                        clientId: 'c420_' + mpState.userId + '_' + Math.floor(Math.random() * 9999),
+                        clean: true,
+                        connectTimeout: 5000,
+                        reconnectPeriod: 3000
+                    });
+
+                    mqttClient.on('connect', () => {
+                        mpState.enabled = true;
+                        const statusEl = document.getElementById('mpUserIdDisplay');
+                        const dotEl = document.getElementById('mpStatusDot');
+                        if (statusEl) statusEl.textContent = `Online (${mpState.userId})`;
+                        if (dotEl) dotEl.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+
+                        mqttClient.subscribe(`${MP_TOPIC_PREFIX}lobby`, { qos: 0 });
+                        if (mpState.partyCode) {
+                            mqttClient.subscribe(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, { qos: 0 });
+                        }
+                    });
+
+                    mqttClient.on('message', (topic, messageBuffer) => {
+                        try {
+                            const payload = JSON.parse(messageBuffer.toString());
+                            handleIncomingRelayPacket(topic, payload);
+                        } catch (err) {
+                            // Ignore malformed packets
+                        }
+                    });
+                } catch (e) {
+                    console.warn('MQTT fallback to local BroadcastChannel:', e);
+                }
+            }
+
+            // Periodic heartbeat for public party discovery & host room sync
+            setInterval(() => {
+                const now = Date.now();
+                let changed = false;
+                for (const code of Object.keys(publicPartiesRegistry)) {
+                    if (now - publicPartiesRegistry[code].UpdatedAt > 9500) {
+                        delete publicPartiesRegistry[code];
+                        changed = true;
+                    }
+                }
+                if (changed) renderPublicPartiesList();
+
+                if (mpState.partyCode && mpState.isHost && mpState.partyData) {
+                    broadcastPartyRoomState();
+                    if (mpState.partyData.isPublic && gameState.phase === 'PRESTART') {
+                        const humanCount = Object.values(mpState.partyData.slots).filter(Boolean).length;
+                        publishRelayPacket(`${MP_TOPIC_PREFIX}lobby`, {
+                            type: 'PUBLIC_ROOM_HEARTBEAT',
+                            code: mpState.partyCode,
+                            hostName: mpState.playerName,
+                            players: humanCount,
+                            windMode: config.windMode,
+                            startLengthSec: config.startLengthSec
+                        });
+                    }
+                }
+            }, 2200);
+        }
+
+        function publishRelayPacket(topic, payload) {
+            if (!payload) return;
+            payload._senderId = mpState.userId;
+            if (localBus) {
+                try { localBus.postMessage({ topic, payload }); } catch (e) {}
+            }
+            if (mqttClient && mqttClient.connected) {
+                try { mqttClient.publish(topic, JSON.stringify(payload), { qos: 0 }); } catch (e) {}
+            }
+        }
+
+        function subscribeRoomTopic(code) {
+            if (mqttClient && mqttClient.connected && code) {
+                mqttClient.subscribe(`${MP_TOPIC_PREFIX}room_${code}`, { qos: 0 });
+            }
+        }
+
+        function unsubscribeRoomTopic(code) {
+            if (mqttClient && mqttClient.connected && code) {
+                mqttClient.unsubscribe(`${MP_TOPIC_PREFIX}room_${code}`);
+            }
+        }
+
+        function createMultiplayerParty(isPublic) {
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            if (mpState.partyCode) unsubscribeRoomTopic(mpState.partyCode);
+
+            mpState.partyCode = code;
+            mpState.isHost = true;
+            mpState.remotePlayers = {};
+            mpState.partyData = {
+                code,
+                hostId: mpState.userId,
+                hostName: mpState.playerName || 'Skipper',
+                isPublic: !!isPublic,
+                fillWithBots: document.getElementById('partyFillBotsToggle')?.checked ?? true,
+                startLengthSec: parseInt(document.getElementById('selectStartLength')?.value || '30', 10),
+                penaltyTurnsRequired: parseInt(document.getElementById('selectPenaltyTurns')?.value || '1', 10),
+                windMode: document.getElementById('selectWindMode')?.value || 'shifty',
+                status: 'LOBBY',
+                seed: Date.now(),
+                slots: {
+                    B1: { userId: mpState.userId, name: mpState.playerName || 'Skipper' },
+                    B2: null,
+                    B3: null,
+                    R1: null,
+                    R2: null,
+                    R3: null
+                }
+            };
+            config.playerBoatId = 'B1';
+            config.spectatorMode = false;
+            updateSelectedHelmBadge('B1');
+
+            subscribeRoomTopic(code);
+            showActivePartyUI();
+            renderPartySlotsGrid();
+            broadcastPartyRoomState();
+            showToast(`🎉 Created ${isPublic ? 'Public' : 'Private'} Party ${code}`);
+        }
+
+        function joinMultiplayerParty(codeRaw) {
+            const code = (codeRaw || '').trim().toUpperCase();
+            if (!code) return;
+            if (mpState.partyCode) unsubscribeRoomTopic(mpState.partyCode);
+
+            mpState.partyCode = code;
+            mpState.isHost = false;
+            mpState.remotePlayers = {};
+            mpState.partyData = {
+                code,
+                hostId: null,
+                hostName: 'Host',
+                isPublic: true,
+                fillWithBots: true,
+                startLengthSec: 30,
+                penaltyTurnsRequired: 1,
+                windMode: 'shifty',
+                status: 'LOBBY',
+                seed: Date.now(),
+                slots: { B1: null, B2: null, B3: null, R1: null, R2: null, R3: null }
+            };
+
+            subscribeRoomTopic(code);
+            showActivePartyUI();
+            renderPartySlotsGrid();
+
+            // Switch to Multiplayer tab if joining from outside
+            document.getElementById('tabMultiplayerBtn')?.click();
+
+            // Request room state & auto-claim first open slot from host
+            sendPartyAction({
+                type: 'JOIN_REQUEST',
+                userId: mpState.userId,
+                name: mpState.playerName || 'Skipper'
+            });
+            showToast(`🔗 Connected to Party ${code} — Syncing Slots...`);
+        }
+
+        function leaveMultiplayerParty() {
+            if (!mpState.partyCode) return;
+            const oldCode = mpState.partyCode;
+            sendPartyAction({
+                type: 'LEAVE_PARTY',
+                userId: mpState.userId
+            });
+            unsubscribeRoomTopic(oldCode);
+            delete publicPartiesRegistry[oldCode];
+            renderPublicPartiesList();
+
+            mpState.partyCode = null;
+            mpState.isHost = false;
+            mpState.partyData = null;
+            mpState.remotePlayers = {};
+
+            document.getElementById('mpActivePartyPanel')?.classList.add('hidden');
+            document.getElementById('mpLobbyBrowser')?.classList.remove('hidden');
+            document.getElementById('mpCurrentRoomBadge')?.classList.add('hidden');
+            const startBtnLbl = document.getElementById('startRaceBtnLabel');
+            if (startBtnLbl) startBtnLbl.textContent = 'Start Race';
+            showToast(`Left Party ${oldCode}`);
+        }
+
+        function showActivePartyUI() {
+            if (!mpState.partyData) return;
+            document.getElementById('mpLobbyBrowser')?.classList.add('hidden');
+            document.getElementById('mpActivePartyPanel')?.classList.remove('hidden');
+            const codeEl = document.getElementById('partyCodeDisplay');
+            if (codeEl) codeEl.textContent = mpState.partyCode;
+
+            const tagEl = document.getElementById('partyPrivacyTag');
+            if (tagEl) {
+                tagEl.textContent = mpState.partyData.isPublic ? 'PUBLIC' : 'PRIVATE';
+                tagEl.className = mpState.partyData.isPublic
+                    ? 'px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40';
+            }
+
+            const badge = document.getElementById('mpCurrentRoomBadge');
+            if (badge) {
+                badge.textContent = `ROOM: ${mpState.partyCode}`;
+                badge.classList.remove('hidden');
+            }
+
+            const startBtnLbl = document.getElementById('startRaceBtnLabel');
+            if (startBtnLbl) {
+                startBtnLbl.textContent = mpState.isHost ? `Launch Party Race (${mpState.partyCode})` : `Waiting for Host (or Click to Launch)`;
+            }
+        }
+
+        function updateSelectedHelmBadge(boatId) {
+            const isBlue = boatId.startsWith('B');
+            const hdr = document.getElementById('selectedBoatHeaderBadge');
+            if (hdr) {
+                hdr.textContent = `${isBlue ? 'BLUE' : 'RED'} (${boatId})`;
+                hdr.className = `text-sm font-extrabold mono ${isBlue ? 'text-blue-400' : 'text-rose-400'}`;
+            }
+        }
+
+        function renderPartySlotsGrid() {
+            const grid = document.getElementById('partySlotsGrid');
+            if (!grid || !mpState.partyData) return;
+
+            const slotMeta = [
+                { id: 'B1', label: 'B1 (Pin)', team: 'BLUE' },
+                { id: 'B2', label: 'B2 (Mid)', team: 'BLUE' },
+                { id: 'B3', label: 'B3 (RC)',  team: 'BLUE' },
+                { id: 'R1', label: 'R1 (Pin)', team: 'RED' },
+                { id: 'R2', label: 'R2 (Mid)', team: 'RED' },
+                { id: 'R3', label: 'R3 (RC)',  team: 'RED' }
+            ];
+
+            grid.innerHTML = slotMeta.map(s => {
+                const occupant = mpState.partyData.slots[s.id];
+                const isMine = occupant && occupant.userId === mpState.userId;
+                const isOtherHuman = occupant && occupant.userId !== mpState.userId;
+                const isBlue = s.team === 'BLUE';
+
+                let cardStyle = isBlue
+                    ? 'border-blue-500/40 bg-blue-950/40 text-blue-200 hover:bg-blue-900/50'
+                    : 'border-rose-500/40 bg-rose-950/40 text-rose-200 hover:bg-rose-900/50';
+                if (isMine) {
+                    cardStyle = isBlue
+                        ? 'border-blue-400 bg-blue-600 text-white shadow-md'
+                        : 'border-rose-400 bg-rose-600 text-white shadow-md';
+                } else if (isOtherHuman) {
+                    cardStyle = 'border-amber-400/60 bg-slate-800/90 text-amber-200';
+                }
+
+                const subText = isMine
+                    ? `YOU (${occupant.name})`
+                    : (isOtherHuman ? `👤 ${occupant.name}` : (mpState.partyData.fillWithBots ? '🤖 AI Bot (Click)' : 'Open Slot'));
+
+                return `
+                    <button type="button" data-party-slot="${s.id}" class="party-slot-btn p-2 rounded-lg border text-left transition flex flex-col justify-between ${cardStyle}">
+                        <div class="flex items-center justify-between w-full">
+                            <span class="mono text-xs font-extrabold">${s.label}</span>
+                            ${isMine ? '<span class="text-[9px] px-1 rounded bg-white/20 font-bold">YOU</span>' : ''}
+                        </div>
+                        <div class="text-[10px] font-bold truncate mt-1 opacity-95">${subText}</div>
+                    </button>
+                `;
+            }).join('');
+
+            grid.querySelectorAll('.party-slot-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const slotId = btn.getAttribute('data-party-slot');
+                    claimPartySlot(slotId);
+                });
+            });
+        }
+
+        function claimPartySlot(slotId) {
+            if (!mpState.partyCode || !mpState.partyData) return;
+            const existing = mpState.partyData.slots[slotId];
+            if (existing && existing.userId !== mpState.userId) {
+                showToast(`Slot ${slotId} is already taken by ${existing.name}`);
+                return;
+            }
+
+            if (mpState.isHost) {
+                for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                    if (mpState.partyData.slots[k]?.userId === mpState.userId) {
+                        mpState.partyData.slots[k] = null;
+                    }
+                }
+                mpState.partyData.slots[slotId] = { userId: mpState.userId, name: mpState.playerName || 'Skipper' };
+                config.playerBoatId = slotId;
+                updateSelectedHelmBadge(slotId);
+                renderPartySlotsGrid();
+                broadcastPartyRoomState();
+            } else {
+                config.playerBoatId = slotId;
+                updateSelectedHelmBadge(slotId);
+                sendPartyAction({
+                    type: 'CLAIM_SLOT',
+                    slotId,
+                    userId: mpState.userId,
+                    name: mpState.playerName || 'Skipper'
+                });
+            }
+        }
+
+        function renderPublicPartiesList() {
+            const listEl = document.getElementById('publicPartiesList');
+            const countEl = document.getElementById('publicPartiesCount');
+            if (!listEl || !countEl) return;
+
+            const rooms = Object.values(publicPartiesRegistry);
+            countEl.textContent = `${rooms.length} Active`;
+
+            if (rooms.length === 0) {
+                listEl.innerHTML = `<div class="text-slate-500 text-[11px] italic py-2 text-center">No public parties open yet.</div>`;
+                return;
+            }
+
+            listEl.innerHTML = rooms.map(r => `
+                <div class="flex items-center justify-between bg-slate-900/90 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                    <div>
+                        <span class="mono font-extrabold text-amber-300">${r.code}</span>
+                        <span class="text-slate-400 text-[11px] ml-1.5">Host: <strong class="text-slate-200">${r.hostName}</strong> (${r.players}/6)</span>
+                    </div>
+                    <button type="button" data-join-public="${r.code}" class="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[11px]">
+                        Join
+                    </button>
+                </div>
+            `).join('');
+
+            listEl.querySelectorAll('[data-join-public]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const c = btn.getAttribute('data-join-public');
+                    joinMultiplayerParty(c);
+                });
+            });
+        }
+
+        function broadcastPartyRoomState() {
+            if (!mpState.partyCode || !mpState.isHost || !mpState.partyData) return;
+            mpState.partyData.fillWithBots = document.getElementById('partyFillBotsToggle')?.checked ?? true;
+            mpState.partyData.startLengthSec = parseInt(document.getElementById('selectStartLength')?.value || '30', 10);
+            mpState.partyData.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns')?.value || '1', 10);
+            mpState.partyData.windMode = document.getElementById('selectWindMode')?.value || 'shifty';
+
+            publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, {
+                type: 'ROOM_STATE',
+                partyData: mpState.partyData
+            });
+        }
+
+        function sendPartyAction(actionPayload) {
+            if (!mpState.partyCode) return;
+            publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, actionPayload);
+        }
+
+        function handleIncomingRelayPacket(topic, packet) {
+            if (!packet || packet._senderId === mpState.userId) return;
+
+            // 1. Public Lobby Discovery Broadcasts
+            if (topic === `${MP_TOPIC_PREFIX}lobby`) {
+                if (packet.type === 'PUBLIC_ROOM_HEARTBEAT' && packet.code) {
+                    publicPartiesRegistry[packet.code] = {
+                        code: packet.code,
+                        hostName: packet.hostName || 'Host',
+                        players: packet.players || 1,
+                        windMode: packet.windMode || 'shifty',
+                        UpdatedAt: Date.now()
+                    };
+                    renderPublicPartiesList();
+                }
+                return;
+            }
+
+            // 2. Room-Specific Packets
+            if (!mpState.partyCode || topic !== `${MP_TOPIC_PREFIX}room_${mpState.partyCode}`) return;
+
+            if (mpState.isHost && mpState.partyData) {
+                if (packet.type === 'JOIN_REQUEST') {
+                    // Assign first free slot if player doesn't already have one
+                    let assigned = null;
+                    for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                        if (mpState.partyData.slots[k]?.userId === packet.userId) {
+                            assigned = k;
+                            break;
+                        }
+                    }
+                    if (!assigned) {
+                        for (const k of ['R1', 'B2', 'R2', 'B3', 'R3', 'B1']) {
+                            if (!mpState.partyData.slots[k]) {
+                                mpState.partyData.slots[k] = { userId: packet.userId, name: packet.name || 'Skipper' };
+                                assigned = k;
+                                break;
+                            }
+                        }
+                    }
+                    renderPartySlotsGrid();
+                    broadcastPartyRoomState();
+                    showToast(`👋 ${packet.name || 'Skipper'} joined Party (${assigned || 'Spectator'})`);
+                } else if (packet.type === 'CLAIM_SLOT' && packet.slotId) {
+                    const currentOcc = mpState.partyData.slots[packet.slotId];
+                    if (!currentOcc || currentOcc.userId === packet.userId) {
+                        for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                            if (mpState.partyData.slots[k]?.userId === packet.userId) {
+                                mpState.partyData.slots[k] = null;
+                            }
+                        }
+                        mpState.partyData.slots[packet.slotId] = { userId: packet.userId, name: packet.name || 'Skipper' };
+                        renderPartySlotsGrid();
+                        broadcastPartyRoomState();
+                    }
+                } else if (packet.type === 'LEAVE_PARTY') {
+                    for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                        if (mpState.partyData.slots[k]?.userId === packet.userId) {
+                            mpState.partyData.slots[k] = null;
+                        }
+                    }
+                    renderPartySlotsGrid();
+                    broadcastPartyRoomState();
+                }
+            }
+
+            // Non-host receives authoritative Room State & Race Start from Host
+            if (!mpState.isHost && packet.type === 'ROOM_STATE' && packet.partyData) {
+                mpState.partyData = packet.partyData;
+                for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                    if (mpState.partyData.slots[k]?.userId === mpState.userId) {
+                        config.playerBoatId = k;
+                        updateSelectedHelmBadge(k);
+                    }
+                }
+                const startSel = document.getElementById('selectStartLength');
+                const penSel = document.getElementById('selectPenaltyTurns');
+                const windSel = document.getElementById('selectWindMode');
+                const fillToggle = document.getElementById('partyFillBotsToggle');
+                if (startSel) startSel.value = String(mpState.partyData.startLengthSec || 30);
+                if (penSel) penSel.value = String(mpState.partyData.penaltyTurnsRequired || 1);
+                if (windSel) windSel.value = mpState.partyData.windMode || 'shifty';
+                if (fillToggle) fillToggle.checked = !!mpState.partyData.fillWithBots;
+
+                showActivePartyUI();
+                renderPartySlotsGrid();
+            }
+
+            if (packet.type === 'START_RACE' && packet.partyData) {
+                mpState.partyData = packet.partyData;
+                launchRegattaFromPartyState(packet.partyData);
+            }
+
+            // Live In-Race Telemetry Sync
+            if (packet.type === 'BOAT_STATE' && packet.boat) {
+                mpState.remotePlayers[packet.boat.id] = packet.boat;
+            }
+
+            if (!mpState.isHost && packet.type === 'WORLD_SYNC' && packet.boats) {
+                gameState.timer = packet.timer;
+                gameState.phase = packet.phase;
+                gameState.finishWindowTimer = packet.finishWindowTimer;
+                for (const bSnap of packet.boats) {
+                    if (bSnap.id === config.playerBoatId) continue; // Keep our own local helm responsive
+                    mpState.remotePlayers[bSnap.id] = bSnap;
+                }
+            }
+        }
+
+        function broadcastLiveMultiplayerTelemetry(now) {
+            if (!mpState.partyCode || !gameState.running) return;
+            if (now - mpState.lastSyncSent < 55) return; // ~18 Hz network tick
+            mpState.lastSyncSent = now;
+
+            const myBoat = gameState.boats.find(b => b.id === config.playerBoatId && b.isPlayer);
+            if (myBoat) {
+                publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, {
+                    type: 'BOAT_STATE',
+                    boat: {
+                        id: myBoat.id,
+                        x: Math.round(myBoat.x * 10) / 10,
+                        y: Math.round(myBoat.y * 10) / 10,
+                        heading: Math.round(myBoat.heading * 10) / 10,
+                        speed: Math.round(myBoat.speed * 100) / 100,
+                        tack: myBoat.tack,
+                        twa: Math.round(myBoat.twa),
+                        luffing: myBoat.luffing,
+                        spinning: myBoat.spinning,
+                        penalties: myBoat.penalties,
+                        leg: myBoat.leg,
+                        finished: myBoat.finished,
+                        finishTime: myBoat.finishTime,
+                        ocs: myBoat.ocs,
+                        skipperName: myBoat.skipperName
+                    }
+                });
+            }
+
+            // If Host, also broadcast AI bot states & authoritative clock so all clients see identical bot positions
+            if (mpState.isHost && mpState.partyData) {
+                const botStates = [];
+                for (const b of gameState.boats) {
+                    const slotOcc = mpState.partyData.slots[b.id];
+                    const isRemoteClient = slotOcc && slotOcc.userId !== mpState.userId;
+                    if (!isRemoteClient) {
+                        botStates.push({
+                            id: b.id,
+                            x: Math.round(b.x * 10) / 10,
+                            y: Math.round(b.y * 10) / 10,
+                            heading: Math.round(b.heading * 10) / 10,
+                            speed: Math.round(b.speed * 100) / 100,
+                            tack: b.tack,
+                            twa: Math.round(b.twa),
+                            luffing: b.luffing,
+                            spinning: b.spinning,
+                            penalties: b.penalties,
+                            leg: b.leg,
+                            finished: b.finished,
+                            finishTime: b.finishTime,
+                            ocs: b.ocs,
+                            skipperName: b.skipperName
+                        });
+                    }
+                }
+                publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, {
+                    type: 'WORLD_SYNC',
+                    timer: gameState.timer,
+                    phase: gameState.phase,
+                    finishWindowTimer: gameState.finishWindowTimer,
+                    boats: botStates
+                });
+            }
+        }
+
+        function launchRegattaFromPartyState(pData) {
+            config.startLengthSec = pData.startLengthSec || 30;
+            config.penaltyTurnsRequired = pData.penaltyTurnsRequired || 1;
+            config.windMode = pData.windMode || 'shifty';
+            config.fillWithBots = pData.fillWithBots ?? true;
+
+            for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                if (pData.slots[k]?.userId === mpState.userId) {
+                    config.playerBoatId = k;
+                }
+            }
+
+            startNewRegatta(pData.seed || Date.now(), pData);
+        }
+
+        // ============================================================================
         // REGATTA LIFECYCLE, FINISH MODAL, START SCREEN TABS & INPUT LISTENERS
         // ============================================================================
-        function startNewRegatta() {
+        function startNewRegatta(customSeed = null, partySnapshot = null) {
+            // If we are in a Multiplayer Party and Host clicks Start Race, broadcast START_RACE to everyone in the room
+            if (mpState.partyCode && mpState.partyData && !partySnapshot) {
+                mpState.partyData.seed = Date.now();
+                mpState.partyData.status = 'RACING';
+                mpState.partyData.fillWithBots = document.getElementById('partyFillBotsToggle')?.checked ?? true;
+                mpState.partyData.startLengthSec = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
+                mpState.partyData.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
+                mpState.partyData.windMode = document.getElementById('selectWindMode').value || 'shifty';
+
+                publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, {
+                    type: 'START_RACE',
+                    partyData: mpState.partyData
+                });
+                partySnapshot = mpState.partyData;
+                customSeed = mpState.partyData.seed;
+            }
+
             config.startLengthSec = parseInt(document.getElementById('selectStartLength').value, 10) || 30;
             config.penaltyTurnsRequired = parseInt(document.getElementById('selectPenaltyTurns').value, 10) || 1;
             config.windMode = document.getElementById('selectWindMode').value || 'shifty';
@@ -3999,7 +4601,7 @@
             const penLabel = document.getElementById('btnPenaltyLabel');
             if (penLabel) penLabel.textContent = config.penaltyTurnsRequired === 1 ? 'Spin 360°' : 'Spin 720°';
 
-            initWindField(Date.now());
+            initWindField(customSeed || Date.now());
             gameState.timer = config.startLengthSec;
             gameState.phase = 'PRESTART';
             gameState.finishWindowTimer = null;
@@ -4008,6 +4610,7 @@
             gameState.r18PairMatrix = {};
             gameState.r17PairMatrix = {};
             gameState.collisionSparks = [];
+            mpState.remotePlayers = {};
 
             const slots = [
                 { id: 'B1', team: 'BLUE', x: 635, y: 2224 },
@@ -4018,11 +4621,23 @@
                 { id: 'R3', team: 'RED',  x: 970, y: 2248 }
             ];
 
+            const activeParty = partySnapshot || mpState.partyData;
             gameState.boats = slots.map(s => {
-                const isPlayer = !config.spectatorMode && (s.id === config.playerBoatId);
-                const boat = new Boat(s.id, s.team, isPlayer, s.x, s.y, 318);
-                boat.skipperName = isPlayer ? (mpState.playerName || 'You') : `AI ${s.id}`;
-                return boat;
+                if (activeParty && mpState.partyCode) {
+                    const occ = activeParty.slots[s.id];
+                    const isLocalPlayer = !config.spectatorMode && ((occ && occ.userId === mpState.userId) || (!occ && s.id === config.playerBoatId && !Object.values(activeParty.slots).some(x => x?.userId === mpState.userId)));
+                    const isRemoteHuman = !!(occ && occ.userId !== mpState.userId) || (!mpState.isHost && !isLocalPlayer);
+                    const boat = new Boat(s.id, s.team, isLocalPlayer, s.x, s.y, 318);
+                    boat.isRemoteHuman = isRemoteHuman;
+                    boat.activeInRace = occ ? true : (activeParty.fillWithBots ?? true);
+                    boat.skipperName = occ ? occ.name : `AI ${s.id}`;
+                    return boat;
+                } else {
+                    const isPlayer = !config.spectatorMode && (s.id === config.playerBoatId);
+                    const boat = new Boat(s.id, s.team, isPlayer, s.x, s.y, 318);
+                    boat.skipperName = isPlayer ? (mpState.playerName || 'You') : `AI ${s.id}`;
+                    return boat;
+                }
             });
 
             const focusBoat = gameState.boats.find(b => b.id === config.playerBoatId) || gameState.boats[0];
@@ -4132,6 +4747,7 @@
                     gameState.camera.y += (followTarget.y - gameState.camera.y) * Math.min(1, dt * 7.5);
                 }
 
+                broadcastLiveMultiplayerTelemetry(now);
                 updateTelemetryHUD(postStep.sorted);
             }
 
@@ -4310,9 +4926,7 @@
                 showToast('Enter a valid Room Code or "admintest"');
                 return;
             }
-            mpState.partyCode = rawCode.toUpperCase();
-            showToast(`Joining Party ${mpState.partyCode}...`);
-            startNewRegatta();
+            joinMultiplayerParty(rawCode);
         }
 
         document.getElementById('joinByCodeBtn')?.addEventListener('click', handleRoomCodeJoin);
@@ -4321,30 +4935,20 @@
         });
 
         document.getElementById('createPublicPartyBtn')?.addEventListener('click', () => {
-            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-            mpState.partyCode = code;
-            mpState.isHost = true;
-            document.getElementById('mpLobbyBrowser').classList.add('hidden');
-            document.getElementById('mpActivePartyPanel').classList.remove('hidden');
-            document.getElementById('partyCodeDisplay').textContent = code;
-            document.getElementById('partyPrivacyTag').textContent = 'PUBLIC';
+            createMultiplayerParty(true);
         });
 
         document.getElementById('createPrivatePartyBtn')?.addEventListener('click', () => {
-            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-            mpState.partyCode = code;
-            mpState.isHost = true;
-            document.getElementById('mpLobbyBrowser').classList.add('hidden');
-            document.getElementById('mpActivePartyPanel').classList.remove('hidden');
-            document.getElementById('partyCodeDisplay').textContent = code;
-            document.getElementById('partyPrivacyTag').textContent = 'PRIVATE';
+            createMultiplayerParty(false);
         });
 
         document.getElementById('leavePartyBtn')?.addEventListener('click', () => {
-            mpState.partyCode = null;
-            mpState.isHost = false;
-            document.getElementById('mpActivePartyPanel').classList.add('hidden');
-            document.getElementById('mpLobbyBrowser').classList.remove('hidden');
+            leaveMultiplayerParty();
+        });
+
+        document.getElementById('partyFillBotsToggle')?.addEventListener('change', () => {
+            if (mpState.isHost) broadcastPartyRoomState();
+            renderPartySlotsGrid();
         });
 
         document.getElementById('copyPartyCodeBtn')?.addEventListener('click', () => {
@@ -4358,16 +4962,17 @@
             showToast(`Copied Room Code: ${code}`);
         });
 
-        document.getElementById('startRaceBtn')?.addEventListener('click', startNewRegatta);
-        document.getElementById('playAgainBtn')?.addEventListener('click', startNewRegatta);
+        document.getElementById('startRaceBtn')?.addEventListener('click', () => startNewRegatta());
+        document.getElementById('playAgainBtn')?.addEventListener('click', () => startNewRegatta());
         document.getElementById('changeSettingsBtn')?.addEventListener('click', () => {
             document.getElementById('finishModal').classList.add('hidden');
             document.getElementById('finishModal').classList.remove('flex');
             document.getElementById('startModal').classList.remove('hidden');
         });
 
-        // Boot initial background scene & start loop
+        // Boot initial background scene, multiplayer relay & start loop
         initWindField(Date.now());
+        initMultiplayerRelay();
         requestAnimationFrame(mainLoop);
     </script>
 </body>
