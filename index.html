@@ -800,6 +800,12 @@
         // ============================================================================
         // STANDARD 3 ON 3 TEAM RACE PLAYBOOK COORDINATOR + WHOLE-RACE INTELLIGENCE
         // ============================================================================
+        function getCourseProgressScore(boat) {
+            if (!boat) return 0;
+            const wp = boat.getWaypointForCurrentLeg();
+            return (boat.leg * 10000) + (boat.markHalfRounded ? 2500 : 0) - distBetween(boat, wp);
+        }
+
         function scoreManeuverAdvantage(executor, victim, beneficiary, execPlace, winTeam, loseTeam, winRanks, isAlreadyCommitted = false) {
             if (!executor || !victim || executor.finished || victim.finished) {
                 return { feasible: false, score: 0, bailReason: 'Target finished' };
@@ -844,19 +850,28 @@
             if (victim.place === 6) {
                 return { feasible: false, score: 0, bailReason: 'Never slow #6 — fleet race forward!' };
             }
-            // Prevent executor from sacrificing their own place:
-            // Do not slow/trap if a trailing opponent is close behind the executor,
-            // or if the executor is barely ahead of the victim in open water without a clean buffer.
+
+            // Strict Position-Protection Check:
+            // Measure true course progress lead over the victim and any other trailing opponent.
             const nearMarkForSacrifice = mark && dExecMark < THREE_BL_RADIUS * 3.2;
-            const minLeadBuffer = nearMarkForSacrifice ? BOAT_LENGTH * 0.70 : BOAT_LENGTH * 1.15;
-            if (execPlace > victim.place || (dExecVictim < minLeadBuffer && !isAlreadyCommitted)) {
-                return { feasible: false, score: 0, bailReason: 'Insufficient lead buffer — would lose position' };
+            const leadProgressPx = getCourseProgressScore(executor) - getCourseProgressScore(victim);
+            const minProgressLead = isAlreadyCommitted
+                ? (nearMarkForSacrifice ? BOAT_LENGTH * 0.85 : BOAT_LENGTH * 1.15)
+                : (nearMarkForSacrifice ? BOAT_LENGTH * 1.15 : BOAT_LENGTH * 1.55);
+
+            if (execPlace > victim.place || leadProgressPx < minProgressLead) {
+                return { feasible: false, score: 0, bailReason: 'Lead buffer too thin — protect own position!' };
+            }
+
+            // Do not initiate an open-water pass-back if the beneficiary teammate is too far behind (> 5.2 BL) to capitalize
+            if (!nearMarkForSacrifice && beneficiary && dVictimBen > (isAlreadyCommitted ? BOAT_LENGTH * 6.0 : BOAT_LENGTH * 4.8)) {
+                return { feasible: false, score: 0, bailReason: 'Teammate too far back for open-water passback' };
             }
 
             const trailingOpponentThreat = gameState.boats.find(b =>
                 b.activeInRace && !b.finished && b.team !== executor.team && b.id !== victim.id &&
                 b.place > execPlace &&
-                distBetween(executor, b) < BOAT_LENGTH * 3.8
+                (distBetween(executor, b) < BOAT_LENGTH * 4.2 || (getCourseProgressScore(executor) - getCourseProgressScore(b)) < BOAT_LENGTH * 2.2)
             );
             if (trailingOpponentThreat) {
                 return { feasible: false, score: 0, bailReason: `Would lose place to ${trailingOpponentThreat.id}` };
@@ -867,7 +882,10 @@
                 .map(b => b.place || 6)
                 .sort((a, b) => a - b);
             const execTeamSum = execTeamRanks.reduce((a, b) => a + b, 0);
-            if (execTeamSum >= 12) {
+            const has2AndLosing = isLosing && execTeamRanks.includes(2);
+            const has23AndLosing = isLosing && execTeamRanks[0] === 2 && execTeamRanks[1] === 3;
+
+            if (execTeamSum >= 12 && !has2AndLosing && !has23AndLosing) {
                 const simulatedNewSum = execTeamSum - (beneficiary ? (beneficiary.place - victim.place) : 0);
                 if (!beneficiary || simulatedNewSum > 10) {
                     return { feasible: false, score: 0, bailReason: 'Combo too deep (3-4-5 / 4-5-6) — fleet race!' };
@@ -879,8 +897,9 @@
                 ? Math.max(-18, 28 * (1 - dVictimBen / (BOAT_LENGTH * 6.8)))
                 : 0;
 
-            const nearMark = mark && dExecMark < THREE_BL_RADIUS * 3.5 && dExecMark > MARK_RADIUS * 1.1;
-            const markBonus = nearMark ? 26 : 0;
+            const nearMark = mark && dExecMark < THREE_BL_RADIUS * 4.2 && dExecMark > MARK_RADIUS * 1.1;
+            const markBonus = nearMark ? (has2AndLosing ? 38 : 26) : 0;
+            const losing23Bonus = has23AndLosing ? 28 : (has2AndLosing && execPlace === 2 ? 22 : 0);
             const compressionBonus = (isLosing && beneficiary && dVictimBen > BOAT_LENGTH * 2.0) ? 24 : 0;
             const hysteresisBonus = isAlreadyCommitted ? 14 : 0;
 
@@ -894,20 +913,24 @@
             }
 
             const totalScore = Math.round(
-                comboValue + controlProximityBonus + benSupportBonus + markBonus + compressionBonus + hysteresisBonus - compressionRiskPenalty
+                comboValue + controlProximityBonus + benSupportBonus + markBonus + losing23Bonus + compressionBonus + hysteresisBonus - compressionRiskPenalty
             );
 
-            const threshold = isAlreadyCommitted ? 32 : 42;
+            const threshold = isAlreadyCommitted ? 30 : (has2AndLosing ? 36 : 42);
             if (totalScore < threshold) {
                 return { feasible: false, score: totalScore, bailReason: `Low advantage (${totalScore} < ${threshold})` };
             }
 
-            const trioType = nearMark ? 'MARK_TRAP' : 'PASSBACK';
-            const outcomeLabel = (isLosing && beneficiary && dVictimBen > BOAT_LENGTH * 2.4)
-                ? `COMPRESS FOR ${beneficiary.id} (Adv:${totalScore})`
-                : (beneficiary
-                    ? `ADVANCE ${beneficiary.id} PAST ${victim.id} (Adv:${totalScore})`
-                    : `TRAP ${victim.id} @ M${executor.leg} (Adv:${totalScore})`);
+            const trioType = (nearMark || (has2AndLosing && execPlace === 2 && mark && dExecMark < THREE_BL_RADIUS * 5.2)) ? 'MARK_TRAP' : 'PASSBACK';
+            const outcomeLabel = has23AndLosing
+                ? `2-3 TRAP ${victim.id} FOR ${beneficiary ? beneficiary.id : 'TEAM'} (Adv:${totalScore})`
+                : (has2AndLosing && execPlace === 2 && trioType === 'MARK_TRAP'
+                    ? `#2 MARK TRAP ${victim.id} FOR ${beneficiary ? beneficiary.id : 'TEAM'} (Adv:${totalScore})`
+                    : ((isLosing && beneficiary && dVictimBen > BOAT_LENGTH * 2.4)
+                        ? `COMPRESS FOR ${beneficiary.id} (Adv:${totalScore})`
+                        : (beneficiary
+                            ? `ADVANCE ${beneficiary.id} PAST ${victim.id} (Adv:${totalScore})`
+                            : `TRAP ${victim.id} @ M${executor.leg} (Adv:${totalScore})`)));
 
             return {
                 feasible: true,
@@ -1087,13 +1110,13 @@
                 const gap4to5 = distBetween(byPlace[4], byPlace[5]);
                 const hasGap = gap4to5 > 135;
                 winCallout = hasGap ? 'PLAY 4-D' : 'PLAY 4-A';
-                loseCallout = 'PLAY 2-A';
+                loseCallout = 'PLAY 2-A (2-3 TRAP)';
                 assign(1, 'COVER', 2, null, 'PLAY 4: HOLD #1', 'LOOSE_COVER');
-                assign(2, 'ATTACK', 4, 3, hasGap ? '14gap5: DOUBLE-TEAM #4!' : 'PLAY 2-A: PIN & SLOW #4', hasGap ? 'DOUBLE_TEAM_4' : 'PASSBACK_EXEC');
-                assign(3, 'ATTACK', hasGap ? 4 : 5, 6, hasGap ? '14gap5: DOUBLE-TEAM #4!' : 'PLAY 2-A: SLOW #5 FOR #6', hasGap ? 'DOUBLE_TEAM_4' : 'PASSBACK_EXEC');
+                assign(2, 'ATTACK', 4, 6, '2-3 LOSING: #2 MARK TRAP & PIN #4!', 'MARK_TRAP');
+                assign(3, 'ATTACK', 4, 6, '2-3 LOSING: #3 DOUBLE TRAP #4/#5 FOR #6!', 'MARK_TRAP');
                 assign(4, 'ESCAPE', 2, 5, 'PLAY 4: ESCAPE PIN & GO FAST!', 'ESCAPE_PIN');
                 assign(5, 'ATTACK', 6, 4, 'PLAY 4: SLOW #6 TO KEEP GAP', 'GAP_SLOW_6');
-                assign(6, 'CHASE', 5, 3, 'PLAY 2-A: PASS BOTH PAIRS', 'SPLIT_CHASE');
+                assign(6, 'PASS', 5, 3, '2-3-6: CATCH UP & PASS #4/#5!', 'PASS_BENEFICIARY');
             } else if (winRanks === '134') {
                 const dist2to3 = distBetween(byPlace[2], byPlace[3]);
                 const dist3to4 = distBetween(byPlace[3], byPlace[4]);
@@ -1101,21 +1124,21 @@
 
                 if (playDefense) {
                     winCallout = 'PLAY 3-D';
-                    loseCallout = 'CHASE';
+                    loseCallout = '2-TRAP';
                     assign(1, 'COVER', 2, 3, 'PLAY 3-D: STAY CLOSER TO #2', 'PIGGY_GUARD_1');
-                    assign(2, 'ATTACK', 3, 5, '256: TRAP #3/#4 AT MARK ONLY', 'MARK_TRAP_ONLY');
+                    assign(2, 'ATTACK', 3, 5, '2-5-6 LOSING: #2 MARK TRAP #3/#4!', 'MARK_TRAP');
                     assign(3, 'COVER', 5, 4, 'PLAY 3-D: COVER #5 & #6', 'LOOSE_COVER');
                     assign(4, 'COVER', 6, 3, 'PLAY 3-D: PROTECT #4', 'TIGHT_COVER');
-                    assign(5, 'CHASE', 4, 6, 'CHASE: SPLIT & PASS #4', 'SPLIT_CHASE');
+                    assign(5, 'PASS', 4, 2, '2-5-6: PASS #4 VIA #2 MARK TRAP', 'PASS_BENEFICIARY');
                     assign(6, 'CHASE', 4, 5, 'CHASE: SPLIT & PASS #4', 'SPLIT_CHASE');
                 } else {
                     winCallout = 'PLAY 1-A';
-                    loseCallout = 'CHASE';
+                    loseCallout = '2-TRAP';
                     assign(1, 'ATTACK', 2, 3, 'PLAY 1-A: SLOW #2, ADVANCE #3', 'PASSBACK_EXEC');
-                    assign(2, 'ESCAPE', 1, 5, '256: AVOID PASSBACK / TRAP', 'ESCAPE_PIN');
+                    assign(2, 'ATTACK', 3, 5, '2-5-6 LOSING: #2 MARK TRAP #3!', 'MARK_TRAP');
                     assign(3, 'PASS', 2, 1, 'PLAY 1-A: PASS #2 -> 124!', 'PASS_BENEFICIARY');
                     assign(4, 'COVER', 5, null, 'PLAY 1-A: DEFEND #4 VS 5/6', 'TIGHT_COVER');
-                    assign(5, 'CHASE', 4, 6, 'CHASE: HIGH-LOW #4', 'SPLIT_CHASE');
+                    assign(5, 'PASS', 4, 2, 'CHASE: PASS #4 VIA #2 TRAP', 'PASS_BENEFICIARY');
                     assign(6, 'CHASE', 4, 5, 'CHASE: SPLIT & PASS #4', 'SPLIT_CHASE');
                 }
             }
@@ -1141,22 +1164,36 @@
                     const tRanks = (teamName === 'BLUE' ? blueRanks : redRanks);
                     const tSum = tRanks.reduce((a, b) => a + b, 0);
                     const is156 = (tRanks.join('') === '156');
+                    const has2Or23 = tRanks.includes(2);
                     if (tSum >= 12 && !is156) {
                         if (teamName === winTeam) winCallout = 'FLEET RACE';
-                        else loseCallout = 'FLEET RACE';
+                        else loseCallout = has2Or23 ? '2-MARK TRAP' : 'FLEET RACE';
                         for (const r of tRanks) {
                             const b = byPlace[r];
-                            if (b && !b.finished) {
-                                const aheadOpp = sortedBoats.slice(0, r - 1).reverse().find(x => x.team !== teamName && !x.finished);
+                            if (!b || b.finished) continue;
+                            // Keep #2 (and #3 in 2-3-x) in active MARK_TRAP / ATTACK mode when losing so they set traps for trailing teammates!
+                            if (r === 2 || (r === 3 && tRanks.includes(2))) {
+                                const victimRank = (r === 2 && tRanks.includes(3)) ? 4 : r + 1;
+                                const benRank = tRanks[tRanks.length - 1];
                                 jobs[b.id] = {
-                                    job: 'CHASE',
-                                    targetId: aheadOpp ? aheadOpp.id : null,
-                                    helperId: null,
-                                    detail: `FLEET RACE (${tRanks.join('-')}): GAIN BOATLENGTHS!`,
-                                    mode: 'FLEET_CATCHUP',
+                                    job: 'ATTACK',
+                                    targetId: byPlace[victimRank]?.id || null,
+                                    helperId: byPlace[benRank]?.id || null,
+                                    detail: `#${r} LOSING (${tRanks.join('-')}): MARK TRAP #${victimRank}!`,
+                                    mode: 'MARK_TRAP',
                                     place: r
                                 };
+                                continue;
                             }
+                            const aheadOpp = sortedBoats.slice(0, r - 1).reverse().find(x => x.team !== teamName && !x.finished);
+                            jobs[b.id] = {
+                                job: 'CHASE',
+                                targetId: aheadOpp ? aheadOpp.id : null,
+                                helperId: null,
+                                detail: `FLEET RACE (${tRanks.join('-')}): GAIN BOATLENGTHS!`,
+                                mode: 'FLEET_CATCHUP',
+                                place: r
+                            };
                         }
                     }
                 }
@@ -1617,6 +1654,140 @@
                 return { x: (clampedX * 0.65 + finMidX * 0.35), y: COURSE.finishPin.y - 25 };
             }
 
+            evaluatePuffAndLullAdvantage(baseWp, effWindDir) {
+                // Only hunt puffs or avoid lulls AFTER the start gun and after crossing the start line (leg >= 1)
+                if (gameState.phase !== 'RACING' || this.leg < 1 || this.ocs) {
+                    return { wp: baseWp, shouldTack: false, tag: null };
+                }
+
+                const activeMark = this.getActiveRoundingMark();
+                const dMark = activeMark ? distBetween(this, activeMark) : distBetween(this, baseWp);
+                // Do not detour for puffs/lulls when inside or right at the mark rounding zone
+                if (dMark < THREE_BL_RADIUS * 1.9) {
+                    return { wp: baseWp, shouldTack: false, tag: null };
+                }
+
+                const toWpX = baseWp.x - this.x;
+                const toWpY = baseWp.y - this.y;
+                const toWpLen = Math.hypot(toWpX, toWpY) || 1;
+                const dirX = toWpX / toWpLen;
+                const dirY = toWpY / toWpLen;
+                const perpX = -dirY;
+                const perpY = dirX;
+
+                const isUpwindLeg = (this.leg === 1 || this.leg === 5);
+                let bestPuff = null;
+                let bestPuffNetGain = 0;
+
+                let worstLull = null;
+                let worstLullLoss = 0;
+
+                for (const p of gameState.puffs) {
+                    // Predict puff/lull center 2.2s ahead as it drifts downwind
+                    const driftRad = degToRad(gameState.baseWindDir + 180);
+                    const px = p.x + Math.sin(driftRad) * 26 * 2.2;
+                    const py = p.y - Math.cos(driftRad) * 26 * 2.2;
+
+                    const dx = px - this.x;
+                    const dy = py - this.y;
+                    const d = Math.hypot(dx, dy);
+                    if (d > 580) continue;
+
+                    const along = dx * dirX + dy * dirY;
+                    const cross = dx * perpX + dy * perpY;
+                    // Only consider wind patches ahead of us toward our leg waypoint
+                    if (along < -30 || along > toWpLen + 60) continue;
+
+                    const avgRadius = (p.rx + p.ry) * 0.5;
+
+                    if (!p.isLull) {
+                        // Estimate VMG speed gain inside puff (including lift/header benefit on upwind legs)
+                        const speedBoostKt = p.deltaSpeed * 0.62;
+                        let shiftBenefitKt = 0;
+                        if (isUpwindLeg) {
+                            // On STBD tack, a clockwise (+shiftDeg) shift is a lift; on PORT tack, a -shiftDeg shift is a lift
+                            const liftDeg = (this.tack === 'STBD') ? p.shiftDeg : -p.shiftDeg;
+                            shiftBenefitKt = liftDeg * 0.08;
+                        }
+                        const extraDistPenalty = Math.max(0, Math.abs(cross) - avgRadius * 0.45) / Math.max(140, along + 90);
+                        const detourCostKt = extraDistPenalty * this.speed * 1.15;
+                        const netGainScore = (speedBoostKt + shiftBenefitKt) - detourCostKt;
+
+                        if (netGainScore > 0.65 && netGainScore > bestPuffNetGain) {
+                            bestPuffNetGain = netGainScore;
+                            bestPuff = { px, py, cross, along, avgRadius, p };
+                        }
+                    } else {
+                        // Lull avoidance: check if our current path or direct line slices through this lull
+                        const clearMargin = avgRadius * 0.92;
+                        if (Math.abs(cross) < clearMargin && along > 0 && along < 440) {
+                            const lullLossScore = Math.abs(p.deltaSpeed) * (1 - Math.abs(cross) / clearMargin);
+                            if (lullLossScore > 0.55 && lullLossScore > worstLullLoss) {
+                                worstLullLoss = lullLossScore;
+                                worstLull = { px, py, cross, along, clearMargin, p };
+                            }
+                        }
+                    }
+                }
+
+                let adjustedWp = { x: baseWp.x, y: baseWp.y };
+                let shouldTack = false;
+                let tag = null;
+
+                // Priority 1: Steer or tack around a speed-killing lull directly ahead
+                if (worstLull && worstLullLoss >= bestPuffNetGain * 0.85) {
+                    const passSide = worstLull.cross >= 0 ? -1 : 1;
+                    const SkirtOffset = worstLull.clearMargin + 38;
+                    adjustedWp = {
+                        x: worstLull.px + perpX * passSide * SkirtOffset,
+                        y: worstLull.py + perpY * passSide * SkirtOffset
+                    };
+                    tag = 'AVOID LULL';
+
+                    if (isUpwindLeg) {
+                        const sign = this.tack === 'STBD' ? -1 : 1;
+                        const currHdgRad = degToRad(wrapAngle180(effWindDir + sign * 42));
+                        const fwdDotLull = ((worstLull.px - this.x) * Math.sin(currHdgRad) + (worstLull.py - this.y) * (-Math.cos(currHdgRad))) / Math.max(1, Math.hypot(worstLull.px - this.x, worstLull.py - this.y));
+                        if (fwdDotLull > 0.91 && Math.hypot(worstLull.px - this.x, worstLull.py - this.y) < 260) {
+                            shouldTack = true;
+                            tag = 'TACK CLEAR OF LULL';
+                        }
+                    }
+                    return { wp: adjustedWp, shouldTack, tag };
+                }
+
+                // Priority 2: Route into a high-advantage puff
+                if (bestPuff) {
+                    const blend = 0.62;
+                    adjustedWp = {
+                        x: bestPuff.px * blend + baseWp.x * (1 - blend),
+                        y: bestPuff.py * blend + baseWp.y * (1 - blend)
+                    };
+                    tag = `HUNT PUFF (+${bestPuff.p.deltaSpeed.toFixed(1)}kt)`;
+
+                    if (isUpwindLeg) {
+                        const oppTack = this.tack === 'STBD' ? 'PORT' : 'STBD';
+                        const oppSign = oppTack === 'STBD' ? -1 : 1;
+                        const oppHdg = wrapAngle180(effWindDir + oppSign * 42);
+                        const currSign = this.tack === 'STBD' ? -1 : 1;
+                        const currHdg = wrapAngle180(effWindDir + currSign * 42);
+
+                        const brgToPuff = radToDeg(Math.atan2(bestPuff.px - this.x, -(bestPuff.py - this.y)));
+                        const errCurr = Math.abs(angleDiff(brgToPuff, currHdg));
+                        const errOpp = Math.abs(angleDiff(brgToPuff, oppHdg));
+
+                        // If tacking points us directly into the puff (< 18° off bow) while our current tack misses it (> 46°)
+                        if (errOpp < 18 && errCurr > 46 && bestPuffNetGain > 0.95) {
+                            shouldTack = true;
+                            tag = `TACK FOR PUFF (+${bestPuff.p.deltaSpeed.toFixed(1)}kt)`;
+                        }
+                    }
+                    return { wp: adjustedWp, shouldTack, tag };
+                }
+
+                return { wp: baseWp, shouldTack: false, tag: null };
+            }
+
             triggerPenaltySpin() {
                 if (this.spinning || this.penalties <= 0) return;
                 this.spinning = true;
@@ -1959,78 +2130,176 @@
 
                 if (jobInfo.mode === 'CLINCH_SPRINT' || jobInfo.mode === 'FLEET_CATCHUP') {
                     this.roleBadge = jobInfo.mode === 'CLINCH_SPRINT' ? 'FLEET SPRINT TO FINISH' : 'FLEET CATCH-UP (#5/#6)';
-                    if (this.shadowFactor > 0.22 && (this.leg === 1 || this.leg === 5) && this.aiTackCooldown <= 0 && this.canSafelyTack(effWindDir)) {
+                    if (gameState.phase === 'RACING' && this.leg >= 1 && !this.ocs) {
+                        const puffEval = this.evaluatePuffAndLullAdvantage(desiredWp, effWindDir);
+                        desiredWp = puffEval.wp;
+                        if (puffEval.tag) {
+                            this.roleBadge = `${jobInfo.mode === 'CLINCH_SPRINT' ? '1-2/1-3' : '#5/#6'} ${puffEval.tag}`;
+                        }
+
+                        const activeMarkSafe = !activeMark || dMark > (MARK_RADIUS + BOAT_LENGTH * 2.1);
+                        if (puffEval.shouldTack && (this.leg === 1 || this.leg === 5) && this.aiTackCooldown <= 0 && activeMarkSafe && this.canSafelyTack(effWindDir)) {
+                            this.triggerTack();
+                            this.aiTackCooldown = 3.2;
+                            return;
+                        }
+                    }
+
+                    const activeMarkSafe = !activeMark || dMark > (MARK_RADIUS + BOAT_LENGTH * 2.1);
+                    if (this.shadowFactor > 0.22 && (this.leg === 1 || this.leg === 5) && this.aiTackCooldown <= 0 && activeMarkSafe && this.canSafelyTack(effWindDir)) {
                         this.triggerTack();
                         this.aiTackCooldown = 3.2;
+                        return;
                     }
                 } else if (jobInfo.job === 'ATTACK' && targetBoat) {
                     const dVictim = distBetween(this, targetBoat);
                     const isMarkTrap = (jobInfo.mode === 'MARK_TRAP' || jobInfo.mode === 'TRAP_GUARD_3' || jobInfo.mode === 'MARK_TRAP_ONLY' || jobInfo.mode === 'TRAP_DOUBLE');
                     const wRad = degToRad(effWindDir);
                     const wpSelf = this.getWaypointForCurrentLeg();
-                    const wpTarget = targetBoat.getWaypointForCurrentLeg();
-                    const selfProgress = (this.leg * 10000) - distBetween(this, wpSelf);
-                    const targetProgress = (targetBoat.leg * 10000) - distBetween(targetBoat, wpTarget);
+                    const selfProgress = getCourseProgressScore(this);
+                    const targetProgress = getCourseProgressScore(targetBoat);
                     const leadGapPx = selfProgress - targetProgress;
 
-                    // Safety floor: if the target gets within 0.85 BL of overtaking us, immediately abort slowing/luffing and sail fast!
-                    if (leadGapPx < BOAT_LENGTH * 0.85) {
-                        this.roleBadge = `PROTECT LEAD OVER ${targetBoat.id}`;
+                    // Check if any OTHER opponent is threatening to pass us from behind while we attack
+                    const secondaryThreat = gameState.boats.find(b =>
+                        b.activeInRace && !b.finished && b.team !== this.team && b.id !== targetBoat.id &&
+                        b.place > this.place &&
+                        (distBetween(this, b) < BOAT_LENGTH * 3.8 || (selfProgress - getCourseProgressScore(b)) < BOAT_LENGTH * 2.1)
+                    );
+
+                    // 1. HARD POSITION-PROTECTION FLOOR:
+                    // If our lead over the target drops below 1.45 BL (or 1.05 BL right at a mark) OR a second enemy is closing fast,
+                    // NEVER slow down and NEVER sail backward toward the target—sail full VMG toward the mark in their wind lane!
+                    const minSafeLeadPx = (isMarkTrap && activeMark && dMark < THREE_BL_RADIUS * 2.5)
+                        ? BOAT_LENGTH * 1.05
+                        : BOAT_LENGTH * 1.45;
+
+                    if (leadGapPx < minSafeLeadPx || secondaryThreat) {
+                        this.roleBadge = `PROTECT POS VS ${targetBoat.id}`;
                         this.luffing = false;
                         this.speedMatchCap = null;
-                        // Stay between the target and the wind to cast dirty air without dropping behind
+
                         if (this.leg === 1 || this.leg === 5) {
+                            // Sail full close-hauled VMG while nudging laterally toward the line between target and mark
+                            const sign = this.tack === 'STBD' ? -1 : 1;
+                            const baseCloseHauled = wrapAngle180(effWindDir + sign * 42);
+                            const latError = (targetBoat.x - this.x) * Math.cos(wRad) + (targetBoat.y - this.y) * Math.sin(wRad);
+                            // Slight 3-degree foot/pinch to stay directly upwind of the target without losing VMG
+                            const laneAdjust = Math.max(-3.5, Math.min(3.5, latError * 0.04));
+                            directHeading = wrapAngle180(baseCloseHauled + laneAdjust);
+                        } else {
+                            // On reaches/runs, aim forward toward our leg waypoint while biasing slightly toward the target's windward lane
                             desiredWp = {
-                                x: targetBoat.x + Math.sin(wRad) * (BOAT_LENGTH * 1.25),
-                                y: targetBoat.y - Math.cos(wRad) * (BOAT_LENGTH * 1.25)
+                                x: wpSelf.x * 0.82 + (targetBoat.x + Math.sin(wRad) * BOAT_LENGTH * 1.5) * 0.18,
+                                y: wpSelf.y * 0.82 + (targetBoat.y - Math.cos(wRad) * BOAT_LENGTH * 1.5) * 0.18
                             };
                         }
-                    } else if (isMarkTrap && activeMark && dMark < THREE_BL_RADIUS * 3.2 && leadGapPx > BOAT_LENGTH * 1.0) {
-                        // Lightly check speed outside the zone while maintaining a safe lead buffer ahead of target
-                        if (dMark > THREE_BL_RADIUS * 1.15 && dVictim > BOAT_LENGTH * 1.15) {
-                            this.roleBadge = `SAFE MARK COVER ${targetBoat.id}`;
-                            this.speedMatchCap = Math.max(2.6, targetBoat.speed * 0.86);
-                        } else {
-                            this.roleBadge = `WIDE ROUND COVER ${targetBoat.id}`;
-                            this.speedMatchCap = Math.max(3.2, targetBoat.speed * 0.96);
+                    } else if (isMarkTrap && activeMark && dMark < THREE_BL_RADIUS * 4.2) {
+                        // 2. SAFE MARK TRAP EXECUTION:
+                        // Aim for a point on the mark's approach side that stays strictly ahead of the target's progress
+                        const toTargetX = targetBoat.x - activeMark.x;
+                        const toTargetY = targetBoat.y - activeMark.y;
+                        const toTargetLen = Math.hypot(toTargetX, toTargetY) || 1;
+                        const interceptDist = Math.min(dMark * 0.72, Math.max(MARK_RADIUS + 34, toTargetLen - BOAT_LENGTH * 1.25));
+
+                        desiredWp = {
+                            x: activeMark.x + (toTargetX / toTargetLen) * interceptDist,
+                            y: activeMark.y + (toTargetY / toTargetLen) * interceptDist
+                        };
+
+                        // Only check speed if we are already directly between the mark and the target AND have > 1.55 BL lead
+                        const targetBrgToMark = radToDeg(Math.atan2(activeMark.x - targetBoat.x, -(activeMark.y - targetBoat.y)));
+                        const targetBrgToSelf = radToDeg(Math.atan2(this.x - targetBoat.x, -(this.y - targetBoat.y)));
+                        const alignedInFrontOfTarget = Math.abs(angleDiff(targetBrgToMark, targetBrgToSelf)) < 26;
+
+                        if (dMark > THREE_BL_RADIUS * 1.1 && alignedInFrontOfTarget && leadGapPx > BOAT_LENGTH * 1.55) {
+                            this.roleBadge = `MARK TRAP ${targetBoat.id}`;
+                            this.speedMatchCap = Math.max(3.35, targetBoat.speed * 0.89);
+                        } else if (dMark <= THREE_BL_RADIUS * 1.25) {
+                            // Inside the zone: carve a wide rounding arc on the outside of the target to hold them slow while keeping our bow ahead
+                            this.roleBadge = `WIDE TRAP ${targetBoat.id}`;
+                            this.speedMatchCap = leadGapPx > BOAT_LENGTH * 1.35 ? Math.max(3.6, targetBoat.speed * 0.94) : null;
                             const wideSign = activeMark.rounding === 'PORT' ? 1 : -1;
                             const markBearing = radToDeg(Math.atan2(activeMark.x - this.x, -(activeMark.y - this.y)));
                             directHeading = wrapAngle180(markBearing + wideSign * 44);
+                        } else {
+                            // Not yet aligned in front of target: sail at full speed to beat them to the mark zone!
+                            this.roleBadge = `BEAT ${targetBoat.id} TO ZONE`;
+                            this.speedMatchCap = null;
                         }
                     } else if (this.leg === 1 || this.leg === 5) {
-                        // Upwind Dirty-Air Cover: stay strictly upwind & ahead of target's bow so our wind shadow slows them without us falling behind
-                        const coverOffset = Math.max(BOAT_LENGTH * 1.15, Math.min(BOAT_LENGTH * 2.1, dVictim * 0.85));
-                        desiredWp = {
-                            x: targetBoat.x + Math.sin(wRad) * coverOffset,
-                            y: targetBoat.y - Math.cos(wRad) * coverOffset
-                        };
-                        this.roleBadge = `DIRTY AIR COVER ${targetBoat.id}`;
-                        this.luffing = false;
-                        // Never slow below target's speed once within 1.4 boat lengths
-                        this.speedMatchCap = dVictim > BOAT_LENGTH * 1.4 ? Math.max(3.1, targetBoat.speed * 0.94) : null;
-
-                        if (this.tack !== targetBoat.tack && dVictim < BOAT_LENGTH * 3.8 && this.aiTackCooldown <= 0 && this.canSafelyTack(effWindDir)) {
+                        // 3. UPWIND PASS-BACK & DIRTY-AIR PIN EXECUTION (NEVER SAIL BACKWARD!):
+                        // Match the target's tack when within lateral range so our wind shadow / sail-bounce cone hits them
+                        const activeMarkSafe = !activeMark || dMark > (MARK_RADIUS + BOAT_LENGTH * 2.1);
+                        if (this.tack !== targetBoat.tack && dVictim < BOAT_LENGTH * 3.8 && this.aiTackCooldown <= 0 && activeMarkSafe && this.canSafelyTack(effWindDir)) {
                             this.triggerTack();
                             this.aiTackCooldown = 3.2;
                             return;
                         }
+
+                        // Project a target point that is ALWAYS forward toward Mark 1 / Finish, shifted laterally into the target's windward/upwind lane
+                        const sign = this.tack === 'STBD' ? -1 : 1;
+                        const closeHauledHdg = wrapAngle180(effWindDir + sign * 42);
+                        const chRad = degToRad(closeHauledHdg);
+
+                        // Lateral offset perpendicular to wind (positive = Starboard of target's wind line)
+                        const dxFromTarget = this.x - targetBoat.x;
+                        const dyFromTarget = this.y - targetBoat.y;
+                        const crossWindErr = dxFromTarget * Math.cos(wRad) + dyFromTarget * Math.sin(wRad);
+                        // Ideal pin position: slightly to windward of target's wind shadow line (14px windward) so target eats our leeward + bounce dirty air
+                        const windwardSign = this.tack === 'STBD' ? 1 : -1;
+                        const desiredCrossWind = windwardSign * 14;
+                        const latDelta = desiredCrossWind - crossWindErr;
+
+                        // Steer close-hauled (42° TWA) with a smooth lateral correction (+/- 7° max) so we NEVER turn downwind/backward!
+                        const hdgCorrection = Math.max(-7, Math.min(7, latDelta * 0.12));
+                        directHeading = wrapAngle180(closeHauledHdg + hdgCorrection);
+
+                        // Check if target is actually eating our dirty air (shadowFactor > 0.18 or leeBowedBy === this.id)
+                        const targetInOurDirtyAir = (targetBoat.shadowFactor > 0.18 || targetBoat.leeBowedBy === this.id) && Math.abs(latDelta) < 34;
+
+                        if (targetInOurDirtyAir && leadGapPx > BOAT_LENGTH * 1.65) {
+                            this.roleBadge = `PINNING ${targetBoat.id} (DIRTY AIR)`;
+                            // Target is already slowed by our dirty air; match 96% of their slowed speed to keep them trapped while helper catches up
+                            this.speedMatchCap = Math.max(3.55, targetBoat.speed * 0.96);
+                        } else {
+                            this.roleBadge = `LOCKING LANE ON ${targetBoat.id}`;
+                            // Full speed until the target is locked in our dirty air cone!
+                            this.speedMatchCap = null;
+                        }
                     } else {
-                        // Reach / Downwind Dirty-Air Blanket: stay upwind/ahead of target to cast our wind shadow cone onto their sails without dropping behind
-                        const coverOffset = Math.max(BOAT_LENGTH * 1.15, Math.min(BOAT_LENGTH * 2.0, dVictim * 0.85));
+                        // 4. REACH / DOWNWIND HOOK & BLANKET (NEVER SAIL BACKWARD!):
+                        // Aim forward along the leg toward wpSelf, shifted laterally to sit between the wind and the target boat
+                        const toWpX = wpSelf.x - this.x;
+                        const toWpY = wpSelf.y - this.y;
+                        const toWpLen = Math.hypot(toWpX, toWpY) || 1;
+                        const lookAhead = Math.min(toWpLen, BOAT_LENGTH * 3.5);
+
+                        const idealBlanketX = targetBoat.x + Math.sin(wRad) * (BOAT_LENGTH * 1.45);
+                        const idealBlanketY = targetBoat.y - Math.cos(wRad) * (BOAT_LENGTH * 1.45);
+                        const forwardX = this.x + (toWpX / toWpLen) * lookAhead;
+                        const forwardY = this.y + (toWpY / toWpLen) * lookAhead;
+
                         desiredWp = {
-                            x: targetBoat.x + Math.sin(wRad) * coverOffset,
-                            y: targetBoat.y - Math.cos(wRad) * coverOffset
+                            x: forwardX * 0.65 + idealBlanketX * 0.35,
+                            y: forwardY * 0.65 + idealBlanketY * 0.35
                         };
-                        this.roleBadge = `WIND BLANKET ${targetBoat.id}`;
-                        this.luffing = false;
-                        this.speedMatchCap = dVictim > BOAT_LENGTH * 1.4 ? Math.max(3.2, targetBoat.speed * 0.94) : null;
+
+                        const targetBlanketed = targetBoat.shadowFactor > 0.18;
+                        if (targetBlanketed && leadGapPx > BOAT_LENGTH * 1.65) {
+                            this.roleBadge = `BLANKET ${targetBoat.id}`;
+                            this.speedMatchCap = Math.max(3.6, targetBoat.speed * 0.95);
+                        } else {
+                            this.roleBadge = `COVER LANE ${targetBoat.id}`;
+                            this.speedMatchCap = null;
+                        }
                     }
                 } else if (jobInfo.job === 'PASS' && targetBoat) {
-                    // Beneficiary teammate: shoot the inside lane at marks or accelerate out from under / tack out
+                    // Beneficiary teammate: shoot the inside lane at marks or accelerate in clean air on the opposite side of the victim
                     this.roleBadge = `PASSING ${targetBoat.id}`;
                     this.luffing = false;
                     this.speedMatchCap = null;
-                    if (activeMark && dMark < THREE_BL_RADIUS * 3.2) {
+                    if (activeMark && dMark < THREE_BL_RADIUS * 3.5) {
                         // Cut tight inside the mark while executor holds victim wide
                         const tightSign = activeMark.rounding === 'PORT' ? -1 : 1;
                         const tightRad = degToRad(radToDeg(Math.atan2(activeMark.x - this.x, -(activeMark.y - this.y))) + tightSign * 65);
@@ -2038,9 +2307,16 @@
                             x: activeMark.x + Math.sin(tightRad) * (MARK_RADIUS + 28),
                             y: activeMark.y - Math.cos(tightRad) * (MARK_RADIUS + 28)
                         };
-                    } else if ((this.leg === 1 || this.leg === 5) && distBetween(this, targetBoat) < BOAT_LENGTH * 2.5 && this.shadowFactor > 0.18 && this.aiTackCooldown <= 0 && this.canSafelyTack(effWindDir)) {
-                        this.triggerTack();
-                        this.aiTackCooldown = 3.4;
+                    } else if ((this.leg === 1 || this.leg === 5) && distBetween(this, targetBoat) < BOAT_LENGTH * 3.2) {
+                        const activeMarkSafe = !activeMark || dMark > (MARK_RADIUS + BOAT_LENGTH * 2.1);
+                        if (this.shadowFactor > 0.16 && this.aiTackCooldown <= 0 && activeMarkSafe && this.canSafelyTack(effWindDir)) {
+                            this.triggerTack();
+                            this.aiTackCooldown = 3.2;
+                            return;
+                        }
+                        // Foot 2 degrees for extra speed in clear air to drive past the pinned victim
+                        const sign = this.tack === 'STBD' ? -1 : 1;
+                        directHeading = wrapAngle180(effWindDir + sign * 44);
                     }
                 } else if (jobInfo.job === 'ESCAPE' && targetBoat) {
                     // Escape pin or mark trap: tack into clear air or slow slightly to avoid outside overlap
