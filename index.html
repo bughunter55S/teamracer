@@ -2207,6 +2207,7 @@
                     // Check immediate personal space bubble in pre-start so bots don't bunch up
                     let prestartRepelX = 0;
                     let prestartRepelY = 0;
+                    let leewardSpaceClear = true;
                     for (const other of gameState.boats) {
                         if (other === this || !other.activeInRace) continue;
                         const dOther = distBetween(this, other);
@@ -2215,42 +2216,110 @@
                             prestartRepelX += ((this.x - other.x) / dOther) * away * 95;
                             prestartRepelY += ((this.y - other.y) / dOther) * away * 95;
                         }
+                        // Check if another boat is directly inside our leeward acceleration pocket
+                        if (other.x < this.x && this.x - other.x < BOAT_LENGTH * 1.45 && Math.abs(other.y - this.y) < BOAT_LENGTH * 1.2) {
+                            leewardSpaceClear = false;
+                        }
                     }
 
-                    if (gameState.timer > 8.5) {
-                        if (this.y < COURSE.startPin.y + 24) {
-                            const hdg = this.applyRightOfWayAndMarkAvoidance(145, effWindDir);
-                            this.steerTowardHeading(dt, hdg, effWindDir);
-                        } else if (this.y > COURSE.startPin.y + 125 || Math.abs(this.x - targetX) > 45 || Math.hypot(prestartRepelX, prestartRepelY) > 15) {
-                            const aimPt = { x: targetX + prestartRepelX, y: holdY + prestartRepelY };
-                            const rawHdg = radToDeg(Math.atan2(aimPt.x - this.x, -(aimPt.y - this.y)));
+                    // Tactical Time-on-Distance (ToD) Pre-Start Setup & Line-Hit Calculator:
+                    // Compute exact Starboard close-hauled VMG toward the starting line (y = COURSE.startPin.y)
+                    const pxPerKnot = 14.2;
+                    const stbdCloseHauledHdg = wrapAngle180(effWindDir - 42);
+                    const stbdRad = degToRad(stbdCloseHauledHdg);
+                    const fullPolarKt = getC420PolarSpeed(42, localWind.speed) * Math.max(0.68, 1 - this.shadowFactor * 0.35);
+                    const fullUpwindVyPxPerSec = Math.max(28, -Math.cos(stbdRad) * fullPolarKt * pxPerKnot);
+                    const fullUpwindVxPxPerSec = Math.sin(stbdRad) * fullPolarKt * pxPerKnot;
+
+                    // Bow-to-line vertical distance (leaving a 6px safety cushion so the bow never pokes OCS at 0.0s)
+                    const bowOffsetPx = BOAT_LENGTH * 0.52 + 6;
+                    const distToLineY = (this.y - bowOffsetPx) - COURSE.startPin.y;
+
+                    // Account for the time/distance spent accelerating from current speed up to full close-hauled speed
+                    const speedDeficitRatio = Math.max(0, (fullPolarKt - this.speed) / Math.max(1, fullPolarKt));
+                    const accelLagSec = speedDeficitRatio * 1.25;
+                    const timeToLineAtFullSpeed = Math.max(0.1, (Math.max(0, distToLineY) / fullUpwindVyPxPerSec) + accelLagSec);
+
+                    // Time surplus (> 0 means we are early and have time to burn; <= 0 means SHEET IN & GO FULL SPEED NOW!)
+                    const timeBufferSec = gameState.timer - timeToLineAtFullSpeed;
+
+                    // Project where our close-hauled run will cross the line horizontally so we set up to windward (right) of our target slot
+                    const runDuration = Math.min(gameState.timer, timeToLineAtFullSpeed);
+                    const setupWindwardOffset = -fullUpwindVxPxPerSec * Math.min(6.5, runDuration);
+                    const idealSetupX = Math.max(
+                        COURSE.startPin.x + 58,
+                        Math.min(COURSE.startRC.x - 36, targetX + setupWindwardOffset)
+                    );
+                    // Ideal vertical staging depth scales smoothly with remaining countdown (48px–96px below the line)
+                    const idealSetupY = COURSE.startPin.y + Math.min(108, Math.max(46, fullUpwindVyPxPerSec * Math.min(5.2, Math.max(2.2, gameState.timer * 0.36))));
+
+                    // Emergency OCS / Too-High Guard: if bow is within 14px of the line with > 1.6s left, bear away / dip back immediately
+                    if (distToLineY < 10 && gameState.timer > 1.6) {
+                        this.roleBadge = 'PRE-START: DIPPING LINE';
+                        this.luffing = false;
+                        this.speedMatchCap = Math.min(2.4, fullPolarKt * 0.55);
+                        const dipHdg = this.applyRightOfWayAndMarkAvoidance(150, effWindDir);
+                        this.steerTowardHeading(dt, dipHdg, effWindDir, 120);
+                        return;
+                    }
+
+                    // PHASE A: Early Setup (> 5.5s buffer before launch) — Sail to our windward staging slot & open a leeward hole
+                    if (timeBufferSec > 5.5) {
+                        const setupTarget = {
+                            x: idealSetupX + prestartRepelX + (leewardSpaceClear ? 0 : 22),
+                            y: idealSetupY + prestartRepelY
+                        };
+                        const dSetup = distBetween(this, setupTarget);
+                        if (dSetup > 32) {
+                            this.roleBadge = 'SETUP START LANE';
+                            const rawHdg = radToDeg(Math.atan2(setupTarget.x - this.x, -(setupTarget.y - this.y)));
                             const safeHdg = this.applyRightOfWayAndMarkAvoidance(rawHdg, effWindDir);
                             this.steerTowardHeading(dt, safeHdg, effWindDir);
-                            if (distBetween(this, aimPt) < 42) {
-                                this.luffing = true;
-                                this.speedMatchCap = 0.95;
-                            }
+                            this.luffing = dSetup < 56;
+                            this.speedMatchCap = dSetup < 56 ? 1.45 : 3.2;
                         } else {
-                            const hdg = this.applyRightOfWayAndMarkAvoidance(wrapAngle180(effWindDir - 42), effWindDir);
-                            this.steerTowardHeading(dt, hdg, effWindDir);
+                            // Hold on Starboard close-hauled in our slot, luffing sails to stay stationary until launch window
+                            this.roleBadge = `HOLDING LANE (+${timeBufferSec.toFixed(1)}s)`;
+                            const holdHdg = this.applyRightOfWayAndMarkAvoidance(wrapAngle180(effWindDir - 38), effWindDir);
+                            this.steerTowardHeading(dt, holdHdg, effWindDir);
                             this.luffing = true;
-                            this.speedMatchCap = 0.85;
+                            this.speedMatchCap = 0.65;
                         }
-                    } else {
-                        this.roleBadge = 'START RUN!';
-                        this.luffing = false;
-                        this.speedMatchCap = null;
-                        const runTarget = { x: targetX + prestartRepelX * 0.45, y: COURSE.startPin.y - 45 };
-                        const rawRun = radToDeg(Math.atan2(runTarget.x - this.x, -(runTarget.y - this.y)));
-                        const relToWind = wrapAngle180(rawRun - effWindDir);
-                        let baseRunHdg = rawRun;
-                        if (Math.abs(relToWind) < 42) {
-                            const sign = this.tack === 'STBD' ? -1 : 1;
-                            baseRunHdg = wrapAngle180(effWindDir + sign * 42);
-                        }
-                        const safeRunHdg = this.applyRightOfWayAndMarkAvoidance(baseRunHdg, effWindDir);
-                        this.steerTowardHeading(dt, safeRunHdg, effWindDir);
+                        return;
                     }
+
+                    // PHASE B: Final Time-on-Distance Trim Window (0.35s < timeBufferSec <= 5.5s)
+                    // Point on our close-hauled start angle and feather speed proportionally to timeBufferSec so we hit 0.0s right on the line
+                    if (timeBufferSec > 0.35) {
+                        this.roleBadge = `TIMING LINE (-${gameState.timer.toFixed(1)}s)`;
+                        // Bear off slightly (48° TWA) if we need to build a leeward gap, or pinch/luff (39° TWA) to burn excess time
+                        const trimTwa = timeBufferSec > 2.2 ? 39 : (leewardSpaceClear ? 44 : 41);
+                        const sign = this.tack === 'STBD' ? -1 : 1;
+                        const timedHdg = this.applyRightOfWayAndMarkAvoidance(wrapAngle180(effWindDir + sign * trimTwa), effWindDir);
+                        this.steerTowardHeading(dt, timedHdg, effWindDir);
+
+                        // Required VMG fraction to arrive exactly at t = 0.0s
+                        const neededSpeedRatio = Math.max(0.18, Math.min(0.92, timeToLineAtFullSpeed / Math.max(0.5, gameState.timer)));
+                        this.luffing = neededSpeedRatio < 0.48;
+                        this.speedMatchCap = Math.max(0.75, fullPolarKt * neededSpeedRatio);
+                        return;
+                    }
+
+                    // PHASE C: Exact Time-on-Distance Launch (timeBufferSec <= 0.35s) — Sheet in 100% to hit the line at full speed on the gun!
+                    this.roleBadge = 'FULL SPEED HIT LINE!';
+                    this.luffing = false;
+                    this.speedMatchCap = null;
+                    const crossX = Math.max(COURSE.startPin.x + 48, Math.min(COURSE.startRC.x - 42, this.x + fullUpwindVxPxPerSec * Math.max(1.2, gameState.timer)));
+                    const runTarget = { x: crossX + prestartRepelX * 0.35, y: COURSE.startPin.y - 48 };
+                    const rawRun = radToDeg(Math.atan2(runTarget.x - this.x, -(runTarget.y - this.y)));
+                    const relToWind = wrapAngle180(rawRun - effWindDir);
+                    let baseRunHdg = rawRun;
+                    if (Math.abs(relToWind) < 42) {
+                        const sign = this.tack === 'STBD' ? -1 : 1;
+                        baseRunHdg = wrapAngle180(effWindDir + sign * 42);
+                    }
+                    const safeRunHdg = this.applyRightOfWayAndMarkAvoidance(baseRunHdg, effWindDir);
+                    this.steerTowardHeading(dt, safeRunHdg, effWindDir);
                     return;
                 }
 
