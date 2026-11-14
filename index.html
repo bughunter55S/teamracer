@@ -3989,22 +3989,44 @@
         }
 
         // ============================================================================
-        // REAL-TIME MULTIPLAYER PARTY & 3v3 RELAY ENGINE (PEERJS WEBRTC + MQTT + LOCAL)
+        // REAL-TIME CROSS-DEVICE MULTIPLAYER ENGINE
+        // (1) Cloud Firestore Real-Time Sync + (2) Port-443 WSS MQTT Pool + (3) WebRTC PeerJS + (4) Local Bus
         // ============================================================================
-        const MP_TOPIC_PREFIX = 'c420_teamrace_v4_';
-        const PEER_ID_PREFIX = 'C420TRV4-';
+        const MP_TOPIC_PREFIX = 'c420_teamrace_v5_';
+        const PEER_ID_PREFIX = 'C420TRV5-';
+        // Connect simultaneously to standard Port-443 WSS brokers (never blocked by school/ISP firewalls)
         const MQTT_BROKERS = [
-            'wss://broker.hivemq.com:8884/mqtt',
             'wss://broker.emqx.io:8084/mqtt',
+            'wss://broker.hivemq.com:8884/mqtt',
+            'wss://mqtt.eclipseprojects.io:443/mqtt',
             'wss://test.mosquitto.org:8081/mqtt'
         ];
-        let mqttClient = null;
-        let mqttBrokerIdx = 0;
+        const PEER_ICE_CONFIG = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        };
+
+        const mqttClientsPool = [];
         let localBus = null;
         let peerNode = null;
         let hostPeerConn = null;
+        let peerReconnectTimer = null;
         const guestPeerConns = new Map();
         const publicPartiesRegistry = {};
+
+        // Cloud Firestore State (automatically activates if __firebase_config is provided in environment)
+        let fbDb = null;
+        let fbAuth = null;
+        let fbReady = false;
+        let fbMod = null;
+        let fbRoomUnsub = null;
+        let fbTelemUnsub = null;
+        let fbLobbyUnsub = null;
+        const fbAppId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'c420-team-race-sim';
 
         function updateRelayStatusUI(text, isOnline = true) {
             const statusEl = document.getElementById('mpUserIdDisplay');
@@ -4017,55 +4039,213 @@
             }
         }
 
-        function connectNextMqttBroker() {
-            if (typeof mqtt === 'undefined') return;
-            const brokerUrl = MQTT_BROKERS[mqttBrokerIdx % MQTT_BROKERS.length];
+        async function initCloudFirestoreSync() {
+            if (typeof __firebase_config === 'undefined' || !__firebase_config) return;
             try {
-                if (mqttClient) {
-                    try { mqttClient.end(true); } catch (e) {}
+                const appMod = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js');
+                const authMod = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js');
+                const storeMod = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js');
+                fbMod = storeMod;
+
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = appMod.initializeApp(firebaseConfig);
+                fbAuth = authMod.getAuth(app);
+                fbDb = storeMod.getFirestore(app);
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await authMod.signInWithCustomToken(fbAuth, __initial_auth_token);
+                } else {
+                    await authMod.signInAnonymously(fbAuth);
                 }
-                mqttClient = mqtt.connect(brokerUrl, {
-                    clientId: 'c420_' + mpState.userId + '_' + Math.floor(Math.random() * 99999),
-                    clean: true,
-                    connectTimeout: 4000,
-                    reconnectPeriod: 2500
-                });
 
-                mqttClient.on('connect', () => {
-                    mpState.enabled = true;
-                    updateRelayStatusUI(`Online (${mpState.userId})`, true);
-                    mqttClient.subscribe(`${MP_TOPIC_PREFIX}lobby`, { qos: 0 });
-                    if (mpState.partyCode) {
-                        mqttClient.subscribe(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, { qos: 0 });
-                    }
-                    // Immediately request any active public parties from hosts online
-                    publishRelayPacket(`${MP_TOPIC_PREFIX}lobby`, {
-                        type: 'DISCOVER_PUBLIC_PARTIES',
-                        requesterId: mpState.userId
+                if (fbAuth.currentUser?.uid) {
+                    mpState.user = fbAuth.currentUser;
+                }
+                fbReady = true;
+                mpState.enabled = true;
+                updateRelayStatusUI(`Cloud Sync Ready (${mpState.userId})`, true);
+
+                // Subscribe to public parties collection in Cloud Firestore
+                const roomsCol = fbMod.collection(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_parties');
+                fbLobbyUnsub = fbMod.onSnapshot(roomsCol, (snap) => {
+                    const now = Date.now();
+                    snap.forEach((docSnap) => {
+                        const d = docSnap.data();
+                        if (!d || !d.code) return;
+                        if (d.status === 'CLOSED' || (d.updatedAt && now - d.updatedAt > 60000)) {
+                            delete publicPartiesRegistry[d.code];
+                        } else if (d.isPublic && d.status !== 'FINISHED') {
+                            const playersCount = Object.values(d.slots || {}).filter(Boolean).length || 1;
+                            publicPartiesRegistry[d.code] = {
+                                code: d.code,
+                                hostName: d.hostName || 'Host',
+                                players: playersCount,
+                                windMode: d.windMode || 'shifty',
+                                startLengthSec: d.startLengthSec || 30,
+                                status: d.status || 'LOBBY',
+                                UpdatedAt: Date.now()
+                            };
+                        }
                     });
-                    if (mpState.isHost && mpState.partyCode && mpState.partyData) {
-                        broadcastPartyRoomState();
-                        broadcastPublicHeartbeatNow();
-                    }
+                    renderPublicPartiesList();
+                }, (err) => {
+                    console.warn('Firestore lobby watch error:', err);
                 });
 
-                mqttClient.on('error', () => {
-                    mqttBrokerIdx++;
-                    if (!mqttClient.connected && mqttBrokerIdx < MQTT_BROKERS.length * 2) {
-                        connectNextMqttBroker();
+                // If user already created/joined a party before Firestore finished loading, attach room listener now
+                if (mpState.partyCode) {
+                    attachFirestoreRoomListeners(mpState.partyCode);
+                    if (mpState.isHost && mpState.partyData) {
+                        pushPartyStateToFirestore();
                     }
-                });
-
-                mqttClient.on('message', (topic, messageBuffer) => {
-                    try {
-                        const payload = JSON.parse(messageBuffer.toString());
-                        handleIncomingRelayPacket(topic, payload);
-                    } catch (err) {
-                        // Ignore malformed JSON
-                    }
-                });
+                }
             } catch (e) {
-                mqttBrokerIdx++;
+                console.warn('Cloud Firestore unavailable, using WebRTC + Multi-MQTT:', e);
+            }
+        }
+
+        async function pushPartyStateToFirestore() {
+            if (!fbReady || !fbDb || !fbMod || !mpState.partyCode || !mpState.partyData) return;
+            if (!fbAuth?.currentUser) return;
+            try {
+                const roomDocRef = fbMod.doc(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_parties', mpState.partyCode);
+                await fbMod.setDoc(roomDocRef, {
+                    ...mpState.partyData,
+                    updatedAt: Date.now()
+                }, { merge: true });
+            } catch (e) {}
+        }
+
+        function attachFirestoreRoomListeners(code) {
+            if (!fbReady || !fbDb || !fbMod || !code) return;
+            if (!fbAuth?.currentUser) return;
+            if (fbRoomUnsub) { try { fbRoomUnsub(); } catch (e) {} fbRoomUnsub = null; }
+            if (fbTelemUnsub) { try { fbTelemUnsub(); } catch (e) {} fbTelemUnsub = null; }
+
+            const roomDocRef = fbMod.doc(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_parties', code);
+            fbRoomUnsub = fbMod.onSnapshot(roomDocRef, (snap) => {
+                if (!snap.exists()) return;
+                const data = snap.data();
+                if (!data || !data.code) return;
+
+                // If we joined as a guest and the host hasn't claimed a hostId yet, adopt the room state
+                if (!mpState.isHost) {
+                    const prevStatus = mpState.partyData?.status;
+                    mpState.partyData = data;
+                    let myAssignedSlot = null;
+                    for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                        if (data.slots && data.slots[k]?.userId === mpState.userId) {
+                            myAssignedSlot = k;
+                            break;
+                        }
+                    }
+                    if (myAssignedSlot) {
+                        config.playerBoatId = myAssignedSlot;
+                        updateSelectedHelmBadge(myAssignedSlot);
+                    }
+                    showActivePartyUI();
+                    renderPartySlotsGrid();
+
+                    if (data.status === 'RACING' && (!gameState.running || prevStatus !== 'RACING')) {
+                        launchRegattaFromPartyState(data);
+                    }
+                } else {
+                    // Host merges any slot claims written directly by guests to Firestore
+                    if (data.slots && mpState.partyData) {
+                        let slotChanged = false;
+                        for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                            const remoteOcc = data.slots[k];
+                            const localOcc = mpState.partyData.slots[k];
+                            if (remoteOcc && (!localOcc || localOcc.userId !== remoteOcc.userId)) {
+                                // Clear any older slot held by this remote userId
+                                for (const otherK of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                                    if (otherK !== k && mpState.partyData.slots[otherK]?.userId === remoteOcc.userId) {
+                                        mpState.partyData.slots[otherK] = null;
+                                    }
+                                }
+                                mpState.partyData.slots[k] = remoteOcc;
+                                slotChanged = true;
+                            }
+                        }
+                        if (slotChanged) {
+                            renderPartySlotsGrid();
+                            showActivePartyUI();
+                        }
+                    }
+                }
+            }, (err) => {});
+
+            // Watch live boat telemetry document for this room
+            const telemDocRef = fbMod.doc(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_telemetry', code);
+            fbTelemUnsub = fbMod.onSnapshot(telemDocRef, (snap) => {
+                if (!snap.exists() || !gameState.running) return;
+                const tData = snap.data();
+                if (!tData) return;
+
+                if (!mpState.isHost && tData.hostWorld && tData.hostWorld._senderId !== mpState.userId) {
+                    const hw = tData.hostWorld;
+                    gameState.timer = hw.timer ?? gameState.timer;
+                    gameState.phase = hw.phase || gameState.phase;
+                    gameState.finishWindowTimer = hw.finishWindowTimer ?? gameState.finishWindowTimer;
+                    if (Array.isArray(hw.boats)) {
+                        for (const bSnap of hw.boats) {
+                            if (bSnap.id === config.playerBoatId) continue;
+                            mpState.remotePlayers[bSnap.id] = bSnap;
+                        }
+                    }
+                }
+
+                for (const k of ['B1', 'B2', 'B3', 'R1', 'R2', 'R3']) {
+                    const bSnap = tData['boat_' + k];
+                    if (bSnap && bSnap.id && bSnap.id !== config.playerBoatId && bSnap._senderId !== mpState.userId) {
+                        mpState.remotePlayers[bSnap.id] = bSnap;
+                        const targetBoat = gameState.boats.find(b => b.id === bSnap.id);
+                        if (targetBoat && !targetBoat.isPlayer) {
+                            targetBoat.isRemoteHuman = true;
+                        }
+                    }
+                }
+            }, (err) => {});
+        }
+
+        function connectAllMqttBrokers() {
+            if (typeof mqtt === 'undefined') return;
+            for (const brokerUrl of MQTT_BROKERS) {
+                try {
+                    const client = mqtt.connect(brokerUrl, {
+                        clientId: 'c420_' + mpState.userId + '_' + Math.floor(Math.random() * 999999),
+                        clean: true,
+                        connectTimeout: 5000,
+                        reconnectPeriod: 3000
+                    });
+
+                    client.on('connect', () => {
+                        mpState.enabled = true;
+                        const connectedCount = mqttClientsPool.filter(c => c.connected).length;
+                        updateRelayStatusUI(`Online (${connectedCount} Relays • ${mpState.userId})`, true);
+                        client.subscribe(`${MP_TOPIC_PREFIX}lobby`, { qos: 0 });
+                        if (mpState.partyCode) {
+                            client.subscribe(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, { qos: 0 });
+                        }
+                        publishRelayPacket(`${MP_TOPIC_PREFIX}lobby`, {
+                            type: 'DISCOVER_PUBLIC_PARTIES',
+                            requesterId: mpState.userId
+                        });
+                        if (mpState.isHost && mpState.partyCode && mpState.partyData) {
+                            broadcastPartyRoomState();
+                            broadcastPublicHeartbeatNow();
+                        }
+                    });
+
+                    client.on('message', (topic, messageBuffer) => {
+                        try {
+                            const payload = JSON.parse(messageBuffer.toString());
+                            handleIncomingRelayPacket(topic, payload);
+                        } catch (err) {}
+                    });
+
+                    mqttClientsPool.push(client);
+                } catch (e) {}
             }
         }
 
@@ -4097,9 +4277,9 @@
                 });
             }
 
-            // 1. Instant Local Tab-to-Tab & Same-Browser Window Relay via BroadcastChannel + storage events
+            // 1. Instant Local Tab-to-Tab & Same-Browser Window Relay
             if (typeof BroadcastChannel !== 'undefined') {
-                localBus = new BroadcastChannel('c420_mp_bus_v4');
+                localBus = new BroadcastChannel('c420_mp_bus_v5');
                 localBus.onmessage = (ev) => {
                     if (ev.data && ev.data.topic && ev.data.payload) {
                         handleIncomingRelayPacket(ev.data.topic, ev.data.payload);
@@ -4107,21 +4287,23 @@
                 };
             }
 
-            // 2. Global Multi-Broker MQTT over WSS (for public party lobby discovery & room broadcast)
-            connectNextMqttBroker();
+            // 2. Cloud Firestore Real-Time Cross-Device Sync
+            initCloudFirestoreSync();
 
-            // Announce discovery query right away on localBus too
+            // 3. Multi-Broker Simultaneous MQTT over WSS (connects to all brokers in parallel so devices always share at least one common broker)
+            connectAllMqttBrokers();
+
             publishRelayPacket(`${MP_TOPIC_PREFIX}lobby`, {
                 type: 'DISCOVER_PUBLIC_PARTIES',
                 requesterId: mpState.userId
             });
 
-            // Periodic heartbeat for public party discovery & host room sync
+            // Periodic heartbeat for public party discovery, guest handshake retries & host room sync
             setInterval(() => {
                 const now = Date.now();
                 let changed = false;
                 for (const code of Object.keys(publicPartiesRegistry)) {
-                    if (now - publicPartiesRegistry[code].UpdatedAt > 8500) {
+                    if (now - publicPartiesRegistry[code].UpdatedAt > 9500) {
                         delete publicPartiesRegistry[code];
                         changed = true;
                     }
@@ -4131,14 +4313,23 @@
                 if (mpState.partyCode && mpState.isHost && mpState.partyData) {
                     broadcastPartyRoomState();
                     broadcastPublicHeartbeatNow();
+                } else if (mpState.partyCode && !mpState.isHost && mpState.partyData) {
+                    // Guest continuously ensures its slot claim is synced with Host across all transports
+                    if (!mpState.partyData.hostId) {
+                        sendPartyAction({
+                            type: 'JOIN_REQUEST',
+                            preferredSlot: config.playerBoatId,
+                            userId: mpState.userId,
+                            name: mpState.playerName || 'Skipper'
+                        });
+                    }
                 } else if (!mpState.partyCode && !gameState.running) {
-                    // Periodically ping for open public parties when browsing the lobby
                     publishRelayPacket(`${MP_TOPIC_PREFIX}lobby`, {
                         type: 'DISCOVER_PUBLIC_PARTIES',
                         requesterId: mpState.userId
                     });
                 }
-            }, 1800);
+            }, 1600);
         }
 
         function broadcastPublicHeartbeatNow() {
@@ -4160,18 +4351,20 @@
             };
             renderPublicPartiesList();
             publishRelayPacket(`${MP_TOPIC_PREFIX}lobby`, hb);
+            pushPartyStateToFirestore();
         }
 
         function initHostPeerServer(code) {
             if (typeof Peer === 'undefined') return;
             try {
+                clearTimeout(peerReconnectTimer);
                 if (peerNode) {
                     try { peerNode.destroy(); } catch (e) {}
                 }
                 guestPeerConns.clear();
-                peerNode = new Peer(PEER_ID_PREFIX + code);
+                peerNode = new Peer(PEER_ID_PREFIX + code, { config: PEER_ICE_CONFIG });
                 peerNode.on('open', () => {
-                    updateRelayStatusUI(`Hosting Room ${code} (P2P + Relay)`, true);
+                    updateRelayStatusUI(`Hosting ${code} (Cross-Device Live)`, true);
                 });
                 peerNode.on('connection', (conn) => {
                     conn.on('open', () => {
@@ -4196,44 +4389,60 @@
                         guestPeerConns.delete(conn.peer);
                     });
                 });
-            } catch (e) {
-                console.warn('PeerJS host init fallback to MQTT/BroadcastChannel:', e);
-            }
+            } catch (e) {}
         }
 
         function connectClientToHostPeer(code) {
             if (typeof Peer === 'undefined') return;
             try {
+                clearTimeout(peerReconnectTimer);
                 if (peerNode) {
                     try { peerNode.destroy(); } catch (e) {}
                 }
                 hostPeerConn = null;
-                peerNode = new Peer();
+                peerNode = new Peer({ config: PEER_ICE_CONFIG });
                 peerNode.on('open', () => {
-                    const conn = peerNode.connect(PEER_ID_PREFIX + code, { reliable: true });
-                    conn.on('open', () => {
-                        hostPeerConn = conn;
-                        updateRelayStatusUI(`Connected to ${code} (P2P Direct)`, true);
-                        conn.send({
-                            topic: `${MP_TOPIC_PREFIX}room_${code}`,
-                            payload: {
-                                type: 'JOIN_REQUEST',
-                                preferredSlot: config.playerBoatId,
-                                userId: mpState.userId,
-                                name: mpState.playerName || 'Skipper',
-                                _senderId: mpState.userId
+                    const attemptConnect = () => {
+                        if (!mpState.partyCode || mpState.partyCode !== code || mpState.isHost) return;
+                        if (hostPeerConn && hostPeerConn.open) return;
+
+                        const conn = peerNode.connect(PEER_ID_PREFIX + code, { reliable: true });
+                        conn.on('open', () => {
+                            hostPeerConn = conn;
+                            updateRelayStatusUI(`Connected to ${code} (P2P + Relay)`, true);
+                            conn.send({
+                                topic: `${MP_TOPIC_PREFIX}room_${code}`,
+                                payload: {
+                                    type: 'JOIN_REQUEST',
+                                    preferredSlot: config.playerBoatId,
+                                    userId: mpState.userId,
+                                    name: mpState.playerName || 'Skipper',
+                                    _senderId: mpState.userId
+                                }
+                            });
+                        });
+                        conn.on('data', (msg) => {
+                            if (msg && msg.topic && msg.payload) {
+                                handleIncomingRelayPacket(msg.topic, msg.payload);
                             }
                         });
-                    });
-                    conn.on('data', (msg) => {
-                        if (msg && msg.topic && msg.payload) {
-                            handleIncomingRelayPacket(msg.topic, msg.payload);
+                        conn.on('close', () => {
+                            hostPeerConn = null;
+                        });
+                    };
+
+                    attemptConnect();
+                    peerReconnectTimer = setInterval(() => {
+                        if (!mpState.partyCode || mpState.partyCode !== code || mpState.isHost) {
+                            clearInterval(peerReconnectTimer);
+                            return;
                         }
-                    });
+                        if (!hostPeerConn || !hostPeerConn.open) {
+                            attemptConnect();
+                        }
+                    }, 3000);
                 });
-            } catch (e) {
-                console.warn('PeerJS client connect fallback to MQTT/BroadcastChannel:', e);
-            }
+            } catch (e) {}
         }
 
         function publishRelayPacket(topic, payload) {
@@ -4257,22 +4466,34 @@
                     try { hostPeerConn.send({ topic, payload }); } catch (e) {}
                 }
             }
-            // 3. Global MQTT over WSS (public lobby discovery + cross-device room backup)
-            if (mqttClient && mqttClient.connected) {
-                try { mqttClient.publish(topic, JSON.stringify(payload), { qos: 0 }); } catch (e) {}
+            // 3. Simultaneous Multi-Broker MQTT Pool (publishes to all connected brokers so devices across any network receive it)
+            const serialized = JSON.stringify(payload);
+            for (const client of mqttClientsPool) {
+                if (client && client.connected) {
+                    try { client.publish(topic, serialized, { qos: 0 }); } catch (e) {}
+                }
             }
         }
 
         function subscribeRoomTopic(code) {
-            if (mqttClient && mqttClient.connected && code) {
-                mqttClient.subscribe(`${MP_TOPIC_PREFIX}room_${code}`, { qos: 0 });
+            if (!code) return;
+            for (const client of mqttClientsPool) {
+                if (client && client.connected) {
+                    try { client.subscribe(`${MP_TOPIC_PREFIX}room_${code}`, { qos: 0 }); } catch (e) {}
+                }
             }
+            attachFirestoreRoomListeners(code);
         }
 
         function unsubscribeRoomTopic(code) {
-            if (mqttClient && mqttClient.connected && code) {
-                mqttClient.unsubscribe(`${MP_TOPIC_PREFIX}room_${code}`);
+            if (!code) return;
+            for (const client of mqttClientsPool) {
+                if (client && client.connected) {
+                    try { client.unsubscribe(`${MP_TOPIC_PREFIX}room_${code}`); } catch (e) {}
+                }
             }
+            if (fbRoomUnsub) { try { fbRoomUnsub(); } catch (e) {} fbRoomUnsub = null; }
+            if (fbTelemUnsub) { try { fbTelemUnsub(); } catch (e) {} fbTelemUnsub = null; }
         }
 
         function createMultiplayerParty(isPublic) {
@@ -4309,18 +4530,18 @@
             renderPartySlotsGrid();
             broadcastPartyRoomState();
             broadcastPublicHeartbeatNow();
+            pushPartyStateToFirestore();
             showToast(`🎉 Created ${isPublic ? 'Public' : 'Private'} Party ${code} — Click any boat slot to switch!`);
         }
 
-        function joinMultiplayerParty(codeRaw) {
+        async function joinMultiplayerParty(codeRaw) {
             const code = (codeRaw || '').trim().toUpperCase();
             if (!code) return;
             if (mpState.partyCode && mpState.partyCode !== code) {
                 unsubscribeRoomTopic(mpState.partyCode);
             }
 
-            // Pick a default optimistic slot so the joining player immediately sees themselves in a boat
-            const initialSlot = config.playerBoatId || 'R1';
+            const initialSlot = config.playerBoatId === 'B1' ? 'R1' : (config.playerBoatId || 'R1');
             const optimisticSlots = { B1: null, B2: null, B3: null, R1: null, R2: null, R3: null };
             optimisticSlots[initialSlot] = { userId: mpState.userId, name: mpState.playerName || 'Skipper' };
 
@@ -4340,44 +4561,77 @@
                 seed: Date.now(),
                 slots: optimisticSlots
             };
+            config.playerBoatId = initialSlot;
+            updateSelectedHelmBadge(initialSlot);
 
             subscribeRoomTopic(code);
             connectClientToHostPeer(code);
             showActivePartyUI();
             renderPartySlotsGrid();
 
-            // Ensure Multiplayer Party tab is visible
             const multiPane = document.getElementById('multiplayerPane');
             const singlePane = document.getElementById('singleplayerPane');
             if (multiPane && singlePane && multiPane.classList.contains('hidden')) {
                 document.getElementById('tabMultiplayerBtn')?.click();
             }
 
-            // Send immediate join request + repeat after 600ms in case MQTT subscription just finished handshaking
+            // If Cloud Firestore is active, fetch the room document directly and write our slot claim
+            if (fbReady && fbDb && fbMod && fbAuth?.currentUser) {
+                try {
+                    const roomDocRef = fbMod.doc(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_parties', code);
+                    const snap = await fbMod.getDoc(roomDocRef);
+                    if (snap.exists()) {
+                        const remoteRoom = snap.data();
+                        mpState.partyData = remoteRoom;
+                        let pickSlot = initialSlot;
+                        if (remoteRoom.slots && remoteRoom.slots[pickSlot] && remoteRoom.slots[pickSlot].userId !== mpState.userId) {
+                            pickSlot = ['R1', 'B2', 'R2', 'B3', 'R3', 'B1'].find(k => !remoteRoom.slots[k]) || initialSlot;
+                        }
+                        config.playerBoatId = pickSlot;
+                        updateSelectedHelmBadge(pickSlot);
+                        const updatedSlots = { ...(remoteRoom.slots || {}) };
+                        updatedSlots[pickSlot] = { userId: mpState.userId, name: mpState.playerName || 'Skipper' };
+                        mpState.partyData.slots = updatedSlots;
+                        renderPartySlotsGrid();
+                        await fbMod.setDoc(roomDocRef, { slots: updatedSlots, updatedAt: Date.now() }, { merge: true });
+                    }
+                } catch (e) {}
+            }
+
+            // Broadcast join request across MQTT pool + WebRTC + LocalBus
             const joinPacket = {
                 type: 'JOIN_REQUEST',
-                preferredSlot: initialSlot,
+                preferredSlot: config.playerBoatId,
                 userId: mpState.userId,
                 name: mpState.playerName || 'Skipper'
             };
             sendPartyAction(joinPacket);
             setTimeout(() => {
-                if (mpState.partyCode === code && !mpState.isHost) {
-                    sendPartyAction(joinPacket);
-                }
-            }, 650);
+                if (mpState.partyCode === code && !mpState.isHost) sendPartyAction(joinPacket);
+            }, 600);
+            setTimeout(() => {
+                if (mpState.partyCode === code && !mpState.isHost) sendPartyAction(joinPacket);
+            }, 1500);
 
             showToast(`🔗 Joined Party ${code} — Choose your boat slot below!`);
         }
 
-        function leaveMultiplayerParty() {
+        async function leaveMultiplayerParty() {
             if (!mpState.partyCode) return;
             const oldCode = mpState.partyCode;
+            clearInterval(peerReconnectTimer);
+
             if (mpState.isHost && mpState.partyData?.isPublic) {
                 publishRelayPacket(`${MP_TOPIC_PREFIX}lobby`, {
                     type: 'PUBLIC_ROOM_CLOSED',
                     code: oldCode
                 });
+                if (fbReady && fbDb && fbMod && fbAuth?.currentUser) {
+                    try {
+                        const roomDocRef = fbMod.doc(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_parties', oldCode);
+                        await fbMod.setDoc(roomDocRef, { status: 'CLOSED', updatedAt: Date.now() }, { merge: true });
+                    } catch (e) {}
+                }
             }
             sendPartyAction({
                 type: 'LEAVE_PARTY',
@@ -4563,6 +4817,7 @@
             if (mpState.isHost) {
                 broadcastPartyRoomState();
                 broadcastPublicHeartbeatNow();
+                pushPartyStateToFirestore();
             } else {
                 sendPartyAction({
                     type: 'CLAIM_SLOT',
@@ -4570,6 +4825,14 @@
                     userId: mpState.userId,
                     name: mpState.playerName || 'Skipper'
                 });
+                // Also write directly to Firestore room slots so cross-device host sees it immediately
+                if (fbReady && fbDb && fbMod && fbAuth?.currentUser && mpState.partyCode) {
+                    const roomDocRef = fbMod.doc(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_parties', mpState.partyCode);
+                    fbMod.setDoc(roomDocRef, {
+                        slots: mpState.partyData.slots,
+                        updatedAt: Date.now()
+                    }, { merge: true }).catch(() => {});
+                }
             }
         }
 
@@ -4622,6 +4885,7 @@
                 type: 'ROOM_STATE',
                 partyData: mpState.partyData
             });
+            pushPartyStateToFirestore();
         }
 
         function sendPartyAction(actionPayload) {
@@ -4792,53 +5056,64 @@
 
             // Live In-Race Telemetry Sync
             if (packet.type === 'BOAT_STATE' && packet.boat) {
-                if (packet.boat.id !== config.playerBoatId) {
-                    mpState.remotePlayers[packet.boat.id] = packet.boat;
-                    const targetBoat = gameState.boats.find(b => b.id === packet.boat.id);
+                const bSnap = packet.boat;
+                if (bSnap.id && bSnap.id !== config.playerBoatId) {
+                    mpState.remotePlayers[bSnap.id] = bSnap;
+                    const targetBoat = gameState.boats.find(b => b.id === bSnap.id);
                     if (targetBoat && !targetBoat.isPlayer) {
                         targetBoat.isRemoteHuman = true;
                     }
                 }
-            }
-
-            if (!mpState.isHost && packet.type === 'WORLD_SYNC' && packet.boats) {
-                gameState.timer = packet.timer;
-                gameState.phase = packet.phase;
-                gameState.finishWindowTimer = packet.finishWindowTimer;
-                for (const bSnap of packet.boats) {
-                    if (bSnap.id === config.playerBoatId) continue; // Keep our own local helm responsive
-                    mpState.remotePlayers[bSnap.id] = bSnap;
+            } else if (!mpState.isHost && packet.type === 'WORLD_SYNC') {
+                gameState.timer = packet.timer ?? gameState.timer;
+                gameState.phase = packet.phase || gameState.phase;
+                gameState.finishWindowTimer = packet.finishWindowTimer ?? gameState.finishWindowTimer;
+                if (Array.isArray(packet.boats)) {
+                    for (const bSnap of packet.boats) {
+                        if (bSnap.id === config.playerBoatId) continue;
+                        mpState.remotePlayers[bSnap.id] = bSnap;
+                    }
                 }
             }
         }
 
+        let lastFirestoreTelemWrite = 0;
         function broadcastLiveMultiplayerTelemetry(now) {
             if (!mpState.partyCode || !gameState.running) return;
             if (now - mpState.lastSyncSent < 50) return; // 20 Hz network tick
             mpState.lastSyncSent = now;
 
+            const canWriteFirestore = fbReady && fbDb && fbMod && fbAuth?.currentUser && (now - lastFirestoreTelemWrite > 140);
+            if (canWriteFirestore) lastFirestoreTelemWrite = now;
+            const firestorePayload = {};
+
             const myBoat = gameState.boats.find(b => b.id === config.playerBoatId && b.isPlayer);
             if (myBoat) {
+                const boatSnap = {
+                    id: myBoat.id,
+                    x: Math.round(myBoat.x * 10) / 10,
+                    y: Math.round(myBoat.y * 10) / 10,
+                    heading: Math.round(myBoat.heading * 10) / 10,
+                    speed: Math.round(myBoat.speed * 100) / 100,
+                    tack: myBoat.tack,
+                    twa: Math.round(myBoat.twa),
+                    luffing: myBoat.luffing,
+                    spinning: myBoat.spinning,
+                    penalties: myBoat.penalties,
+                    leg: myBoat.leg,
+                    finished: myBoat.finished,
+                    finishTime: myBoat.finishTime,
+                    ocs: myBoat.ocs,
+                    skipperName: myBoat.skipperName,
+                    _senderId: mpState.userId
+                };
                 publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, {
                     type: 'BOAT_STATE',
-                    boat: {
-                        id: myBoat.id,
-                        x: Math.round(myBoat.x * 10) / 10,
-                        y: Math.round(myBoat.y * 10) / 10,
-                        heading: Math.round(myBoat.heading * 10) / 10,
-                        speed: Math.round(myBoat.speed * 100) / 100,
-                        tack: myBoat.tack,
-                        twa: Math.round(myBoat.twa),
-                        luffing: myBoat.luffing,
-                        spinning: myBoat.spinning,
-                        penalties: myBoat.penalties,
-                        leg: myBoat.leg,
-                        finished: myBoat.finished,
-                        finishTime: myBoat.finishTime,
-                        ocs: myBoat.ocs,
-                        skipperName: myBoat.skipperName
-                    }
+                    boat: boatSnap
                 });
+                if (canWriteFirestore) {
+                    firestorePayload['boat_' + myBoat.id] = boatSnap;
+                }
             }
 
             // If Host, also broadcast AI bot states & authoritative clock so all clients see identical bot positions
@@ -4867,13 +5142,23 @@
                         });
                     }
                 }
-                publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, {
+                const worldPacket = {
                     type: 'WORLD_SYNC',
                     timer: gameState.timer,
                     phase: gameState.phase,
                     finishWindowTimer: gameState.finishWindowTimer,
-                    boats: botStates
-                });
+                    boats: botStates,
+                    _senderId: mpState.userId
+                };
+                publishRelayPacket(`${MP_TOPIC_PREFIX}room_${mpState.partyCode}`, worldPacket);
+                if (canWriteFirestore) {
+                    firestorePayload.hostWorld = worldPacket;
+                }
+            }
+
+            if (canWriteFirestore && Object.keys(firestorePayload).length > 0) {
+                const telemDocRef = fbMod.doc(fbDb, 'artifacts', fbAppId, 'public', 'data', 'c420_telemetry', mpState.partyCode);
+                fbMod.setDoc(telemDocRef, firestorePayload, { merge: true }).catch(() => {});
             }
         }
 
